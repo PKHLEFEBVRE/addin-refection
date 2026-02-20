@@ -36,14 +36,7 @@ Public Static Function GetPortfoliosFromFile(ByVal path As String, ByVal dt As D
         If key <> "" Then
             Set port = CreatePortfolio(line, columnsDict)
 
-            ' Load inventory
-            ' Using InfinId as fundId if available, else Name
-            inventoryId = port.InfinId
-            If inventoryId = "" Then inventoryId = port.Name
-
-            If inventoryId <> "" Then
-                Set port.positions = Data.GetInventory(dt, inventoryId)
-            End If
+            ' Inventory is NOT loaded here anymore. It must be loaded on demand via LoadPositionsForType.
 
             If Not portfolios.Exists(key) Then
                 portfolios.Add key, port
@@ -88,7 +81,11 @@ Public Static Function CreatePortfolio(ByVal line As Variant, ByVal columnsDict 
     If columnsDict.Exists("insurer") Then port.insurer = CStr(Replace(line(columnsDict("insurer")), """", ""))
     If columnsDict.Exists("custodian") Then port.custodian = CStr(Replace(line(columnsDict("custodian")), """", ""))
     If columnsDict.Exists("sales") Then port.sales = CStr(Replace(line(columnsDict("sales")), """", ""))
-    If columnsDict.Exists("accountType") Then port.accountType = CStr(Replace(line(columnsDict("accountType")), """", ""))
+
+    ' Mapped properties change: accountType -> MandatType, added Type
+    If columnsDict.Exists("Type") Then port.Type = CStr(Replace(line(columnsDict("Type")), """", ""))
+    If columnsDict.Exists("AccountType") Then port.MandatType = CStr(Replace(line(columnsDict("AccountType")), """", ""))
+
     If columnsDict.Exists("AVType") Then port.AVType = CStr(Replace(line(columnsDict("AVType")), """", ""))
     If columnsDict.Exists("ccy") Then port.ccy = CStr(Replace(line(columnsDict("ccy")), """", ""))
     If columnsDict.Exists("profile") Then port.profile = CStr(Replace(line(columnsDict("profile")), """", ""))
@@ -120,3 +117,18 @@ Public Static Function CreatePortfolio(ByVal line As Variant, ByVal columnsDict 
     Set CreatePortfolio = port
 
 End Function
+
+
+Public Sub LoadPositionsForType(portfolios As Dictionary, typeFilter As String, dt As Date)
+
+    Dim key As Variant
+    Dim port As Portfolio
+
+    For Each key In portfolios
+        Set port = portfolios(key)
+        If LCase(port.Type) = LCase(typeFilter) Then
+            port.GetPositions dt
+        End If
+    Next key
+
+End Sub
