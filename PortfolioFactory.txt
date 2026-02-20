@@ -180,3 +180,82 @@ Public Static Function CreateDiffPortfolio(port As Portfolio, bench As Portfolio
     Set CreateDiffPortfolio = diffPort
 
 End Function
+
+Public Sub EnrichPortfoliosFromDashboard(portfolios As Dictionary, ws As Worksheet)
+
+    Dim data As Variant
+    data = ws.UsedRange.Value
+
+    If Not IsArray(data) Then Exit Sub
+
+    Dim r As Long, c As Long
+    Dim headers As Dictionary
+    Set headers = New Dictionary
+
+    ' Parse Headers (Row 1)
+    For c = 1 To UBound(data, 2)
+        If Not IsError(data(1, c)) Then
+            headers(CStr(data(1, c))) = c
+        End If
+    Next c
+
+    Dim key As String
+    Dim port As Portfolio
+    Dim val As Variant
+
+    ' Loop Data
+    For r = 2 To UBound(data, 1)
+
+        ' Identify Portfolio (Key)
+        ' Assuming "Account name" is the primary key used in the Dashboard sheet
+        key = ""
+        If headers.Exists("Account name") Then
+            key = CStr(data(r, headers("Account name")))
+        End If
+
+        ' Find Portfolio
+        ' Note: portfolios dict might be keyed by InfinId or Name. We check both if possible or rely on Name.
+        ' Since GetPortfoliosFromFile uses Name if InfinId is missing, we try to match Name here.
+        ' However, the main dict keys might be IDs. We might need to scan if direct lookup fails.
+
+        Set port = Nothing
+        ' Try direct lookup if key matches dictionary key logic
+        If portfolios.Exists(key) Then
+            Set port = portfolios(key)
+        Else
+            ' Fallback: Scan by Name or AccountName
+            Dim pKey As Variant
+            For Each pKey In portfolios
+                If LCase(portfolios(pKey).accountName) = LCase(key) Or LCase(portfolios(pKey).Name) = LCase(key) Then
+                    Set port = portfolios(pKey)
+                    Exit For
+                End If
+            Next pKey
+        End If
+
+        If Not port Is Nothing Then
+            ' Update Attributes
+            If headers.Exists("Client") Then port.client = CStr(data(r, headers("Client")))
+
+            If headers.Exists("Creation date") Then
+                If IsDate(data(r, headers("Creation date"))) Then
+                    port.creationDate = CDate(data(r, headers("Creation date")))
+                End If
+            End If
+
+            If headers.Exists("Insurer") Then port.insurer = CStr(data(r, headers("Insurer")))
+            If headers.Exists("Custodian") Then port.custodian = CStr(data(r, headers("Custodian")))
+            If headers.Exists("Sales") Then port.sales = CStr(data(r, headers("Sales")))
+
+            If headers.Exists("Account type") Then port.MandatType = CStr(data(r, headers("Account type")))
+            If headers.Exists("AV Type") Then port.AVType = CStr(data(r, headers("AV Type")))
+            If headers.Exists("CCY") Then port.ccy = CStr(data(r, headers("CCY")))
+            If headers.Exists("Profile") Then port.profile = CStr(data(r, headers("Profile")))
+            If headers.Exists("Composition") Then port.composition = CStr(data(r, headers("Composition")))
+            If headers.Exists("Target Profile") Then port.targetProfile = CStr(data(r, headers("Target Profile")))
+            If headers.Exists("Target Composition") Then port.targetComposition = CStr(data(r, headers("Target Composition")))
+        End If
+
+    Next r
+
+End Sub
