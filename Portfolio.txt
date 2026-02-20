@@ -33,12 +33,40 @@ End Sub
 
 Public Function GetPositions(dt As Date) As Dictionary
 
+    ' If positions are already loaded, return them
+    If positions.count > 0 Then
+        Set GetPositions = positions
+        Exit Function
+    End If
+
+    ' Otherwise, load them
     Dim inventoryId As String
     inventoryId = InfinId
     If inventoryId = "" Then inventoryId = Name
 
     If inventoryId <> "" Then
-        Set positions = Data.GetInventory(dt, inventoryId)
+        Set positions = Data.GetInventory(dt, Me)
+
+        ' Compute AUM and Weights
+        Dim key As Variant
+        Dim pos As Position
+        Dim totalAmount As Double
+
+        totalAmount = 0
+        For Each key In positions
+            Set pos = positions(key)
+            totalAmount = totalAmount + pos.amountBaseCur
+        Next key
+
+        Me.AUM = totalAmount
+
+        If Me.AUM <> 0 Then
+            For Each key In positions
+                Set pos = positions(key)
+                pos.weight = pos.amountBaseCur / Me.AUM
+            Next key
+        End If
+
     End If
 
     Set GetPositions = positions

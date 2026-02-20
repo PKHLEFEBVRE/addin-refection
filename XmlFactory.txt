@@ -28,7 +28,7 @@ Private Function BuildSecbaseLookup(xmlDoc As MSXML2.DOMDocument60) As Dictionar
 End Function
 
 
-Private Sub AddSecurityPositions(xmlDoc As MSXML2.DOMDocument60, positions As Dictionary, names As Dictionary, ByVal fundId As String, ByRef instruments As Dictionary)
+Private Sub AddSecurityPositions(xmlDoc As MSXML2.DOMDocument60, positions As Dictionary, names As Dictionary, ByRef fund As Portfolio, ByRef instruments As Dictionary)
 
     Dim spNode As MSXML2.IXMLDOMNode
     Dim pos As Position
@@ -36,11 +36,16 @@ Private Sub AddSecurityPositions(xmlDoc As MSXML2.DOMDocument60, positions As Di
     Dim config As New Configuration
     Dim assetClass As Variant, posInstrument As Instrument, cashPosition As Position
     Dim aum As Double, tick As Variant, isin As Variant
+    Dim posID As Variant
 
+    ' Calculate current AUM (though typically 0 at start)
     aum = 0
     For Each posID In positions
         aum = aum + positions(posID).amountBaseCur
     Next posID
+
+    Dim fundId As String
+    If fund.InfinId <> "" Then fundId = fund.InfinId Else fundId = fund.Name
 
     For Each spNode In xmlDoc.SelectNodes("//Secpos")
 
@@ -122,21 +127,20 @@ Private Sub AddSecurityPositions(xmlDoc As MSXML2.DOMDocument60, positions As Di
 
     Next spNode
 
-    If aum > 0 And positions.count > 0 Then
-        For Each posID In positions
-            positions(posID).weight = positions(posID).amountBaseCur / aum
-        Next posID
-    End If
+    ' Weight calculation logic removed - now handled in Portfolio.GetPositions
 
 End Sub
 
 
 
-Private Sub AddCashPositions(xmlDoc As MSXML2.DOMDocument60, positions As Dictionary, ByVal fundId As String, ByRef instruments As Dictionary)
+Private Sub AddCashPositions(xmlDoc As MSXML2.DOMDocument60, positions As Dictionary, ByRef fund As Portfolio, ByRef instruments As Dictionary)
 
     Dim pos As Position, fx As Double, posInstrument As Instrument
     Dim contEl As MSXML2.IXMLDOMElement
     Dim cpNode As MSXML2.IXMLDOMNode
+    Dim fundId As String
+
+    If fund.InfinId <> "" Then fundId = fund.InfinId Else fundId = fund.Name
 
     For Each cpNode In xmlDoc.SelectNodes("//Cashpos")
 
@@ -178,7 +182,7 @@ End Sub
 
 
 
-Public Function CreatePositionsDictFromXmlPath(path As String, ByVal fundId As String, ByRef instruments As Dictionary) As Dictionary
+Public Function CreatePositionsDictFromXmlPath(path As String, ByRef fund As Portfolio, ByRef instruments As Dictionary) As Dictionary
 
     Dim xmlDoc As MSXML2.DOMDocument60
     Dim positions  As New Dictionary
@@ -187,8 +191,11 @@ Public Function CreatePositionsDictFromXmlPath(path As String, ByVal fundId As S
     Set xmlDoc = LoadXmlDoc(path)
     Set secbaseDict = BuildSecbaseLookup(xmlDoc)
 
-    AddCashPositions xmlDoc, positions, fundId, instruments
-    AddSecurityPositions xmlDoc, positions, secbaseDict, fundId, instruments
+    Dim fundId As String
+    If fund.InfinId <> "" Then fundId = fund.InfinId Else fundId = fund.Name
+
+    AddCashPositions xmlDoc, positions, fund, instruments
+    AddSecurityPositions xmlDoc, positions, secbaseDict, fund, instruments
 
     Dim pos As Variant, aum As Double
     aum = 0

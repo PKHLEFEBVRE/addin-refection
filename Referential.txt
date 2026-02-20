@@ -15,9 +15,17 @@ Private Sub Class_Initialize()
 End Sub
 
 
-Public Property Get GetInventoryInfin(ByRef dt As Date, ByRef fundId As String) As Dictionary
+Public Property Get GetInventoryInfin(ByRef dt As Date, ByRef fund As Portfolio) As Dictionary
 
     Dim positionsByDate As Dictionary
+    Dim fundId As String
+
+    ' Determine ID to use for caching
+    If fund.InfinId <> "" Then
+        fundId = fund.InfinId
+    Else
+        fundId = fund.Name
+    End If
 
     If PositionsByDateByFundId.Exists(fundId) Then
 
@@ -44,12 +52,12 @@ Public Property Get GetInventoryInfin(ByRef dt As Date, ByRef fundId As String) 
 
         If config.FundsThroughXml.Exists(fundId) Then
 
-            Set positions = PositionFactory.GetPositionsByDateFromXmlFile(dt, fundId)
+            Set positions = PositionFactory.GetPositionsByDateFromXmlFile(dt, fund)
 
         Else
 
             path = config.CreateInventoryCsvPath(dt, fundId)
-            Set positions = PositionFactory.GetPositionsByDateFromInfinCsvFile(path, dt, fundId)
+            Set positions = PositionFactory.GetPositionsByDateFromInfinCsvFile(path, dt, fund)
 
         End If
 
