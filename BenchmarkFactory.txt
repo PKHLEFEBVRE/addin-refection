@@ -52,23 +52,22 @@ Public Function ComputeBenchmark(targetPortfolio As Portfolio) As Portfolio
 End Function
 
 Private Function GetEquityDelta(port As Portfolio) As Double
-    ' Try to look up Equity Delta from the Profile Mapping table using Portfolio Name
-    ' If not found, try using the portfolio's profile property directly
-
-    Dim mapping As Dictionary
-    Set mapping = LoadProfileMapping()
+    ' Equity Delta is provided via EnrichedPortfoliosFromDashboard (external process)
+    ' and stored in the exposureLimits dictionary under "EquityDelta".
 
     Dim delta As Double
     Dim found As Boolean
     found = False
 
-    If mapping.Exists(port.Name) Then
-        delta = mapping(port.Name)
-        found = True
+    If Not port.exposureLimits Is Nothing Then
+        If port.exposureLimits.Exists("EquityDelta") Then
+            delta = CDbl(port.exposureLimits("EquityDelta"))
+            found = True
+        End If
     End If
 
     If Not found Then
-        ' Fallback to port.profile if it's numeric
+        ' Fallback to port.profile if no enriched data available
         On Error Resume Next
         delta = CDbl(port.profile)
         If Err.Number = 0 Then found = True
@@ -119,28 +118,39 @@ Private Function LoadBuckets() As Dictionary
         bucketName = rng.Cells(r, 1).Value
         instrId = rng.Cells(r, 2).Value
         ' Name is in column 3, skipping
-        weight = rng.Cells(r, 4).Value
 
         If bucketName <> "" Then
-            If Not dict.Exists(bucketName) Then
-                Set port = New Portfolio
-                port.Name = bucketName
-                dict.Add bucketName, port
-            Else
-                Set port = dict(bucketName)
+            ' Parse weight safely
+            On Error Resume Next
+            weight = CDbl(rng.Cells(r, 4).Value)
+            If Err.Number <> 0 Then
+                ' Reset weight if parsing failed (e.g. header row)
+                weight = 0
+                bucketName = "" ' Skip processing this row
             End If
+            On Error GoTo 0
 
-            Set pos = New Position
-            pos.posID = instrId
-            pos.weight = weight
-
-            If Not instrDict Is Nothing Then
-                If instrDict.Exists(instrId) Then
-                    Set pos.posInstrument = instrDict(instrId)
+            If bucketName <> "" Then
+                If Not dict.Exists(bucketName) Then
+                    Set port = New Portfolio
+                    port.Name = bucketName
+                    dict.Add bucketName, port
+                Else
+                    Set port = dict(bucketName)
                 End If
-            End If
 
-            port.positions.Add pos.posID, pos
+                Set pos = New Position
+                pos.posID = instrId
+                pos.weight = weight
+
+                If Not instrDict Is Nothing Then
+                    If instrDict.Exists(instrId) Then
+                        Set pos.posInstrument = instrDict(instrId)
+                    End If
+                End If
+
+                port.positions.Add pos.posID, pos
+            End If
         End If
     Next r
 
@@ -185,44 +195,6 @@ Private Function LoadModelComposition(rangeName As String) As Dictionary
     Next r
 
     Set LoadModelComposition = dict
-End Function
-
-Private Function LoadProfileMapping() As Dictionary
-    Dim dict As New Dictionary
-    Dim rng As Range
-    Dim r As Long
-
-    On Error Resume Next
-    Set rng = ThisWorkbook.Names("ProfileMappingData").RefersToRange
-    On Error GoTo 0
-
-    If rng Is Nothing Then
-        Debug.Print "Error: Named range 'ProfileMappingData' not found."
-        Set LoadProfileMapping = dict
-        Exit Function
-    End If
-
-    ' Assuming range columns: FundName, EquityDelta
-
-    Dim fundName As String
-    Dim delta As Double
-
-    For r = 1 To rng.Rows.Count
-        fundName = rng.Cells(r, 1).Value
-
-        If fundName <> "" Then
-            On Error Resume Next
-            delta = CDbl(rng.Cells(r, 2).Value)
-            If Err.Number = 0 Then
-                If Not dict.Exists(fundName) Then
-                    dict.Add fundName, delta
-                End If
-            End If
-            On Error GoTo 0
-        End If
-    Next r
-
-    Set LoadProfileMapping = dict
 End Function
 
 
