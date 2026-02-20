@@ -109,13 +109,38 @@ Public Function GetAggregatedExposure(portfolios As Dictionary, key1 As String, 
 
 End Function
 
+Public Function GenerateDiffPortfolios(portfolios As Dictionary, benchmarks As Dictionary) As Dictionary
+
+    Dim diffPortfolios As New Dictionary
+    Dim key As Variant
+    Dim port As Portfolio, bench As Portfolio, diffPort As Portfolio
+
+    For Each key In portfolios
+        Set port = portfolios(key)
+        If benchmarks.Exists(key) Then
+            Set bench = benchmarks(key)
+            Set diffPort = PortfolioFactory.CreateDiffPortfolio(port, bench)
+            diffPortfolios.Add diffPort.Name, diffPort
+        End If
+    Next key
+
+    Set GenerateDiffPortfolios = diffPortfolios
+
+End Function
+
 Public Function GetExposureReport(portfolios As Dictionary, key1 As String, Optional key2 As String = "") As Variant
 
     Dim aggData As Variant
     aggData = GetAggregatedExposure(portfolios, key1, key2)
 
+    Dim expDicts As Dictionary
+    Dim keys As Dictionary
+
+    Set expDicts = aggData(0)
+    Set keys = aggData(1)
+
     Dim table As Variant
-    table = CommunFactory.TurnExposureDictsToTable(aggData(0), aggData(1))
+    table = CommunFactory.TurnExposureDictsToTable(expDicts, keys)
 
     GetExposureReport = table
 

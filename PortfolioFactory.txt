@@ -132,3 +132,51 @@ Public Sub LoadPositionsForType(portfolios As Dictionary, typeFilter As String, 
     Next key
 
 End Sub
+
+
+Public Static Function CreateDiffPortfolio(port As Portfolio, bench As Portfolio) As Portfolio
+
+    Dim diffPort As Portfolio
+    Set diffPort = New Portfolio
+
+    diffPort.Name = port.Name & " vs " & bench.Name
+    diffPort.Type = "Difference"
+    diffPort.MandatType = port.MandatType
+    diffPort.ccy = port.ccy
+
+    ' Initialize positions dict
+    Set diffPort.positions = New Dictionary
+
+    Dim pPos As Position, bPos As Position, newPos As Position
+    Dim key As Variant
+
+    ' Add all positions from Portfolio (Positive Weight)
+    If Not port.positions Is Nothing Then
+        For Each key In port.positions
+            Set pPos = port.positions(key)
+            Set newPos = pPos.Clone()
+            ' Ensure clone keeps weight (Clone method does)
+            diffPort.positions.Add newPos.posID, newPos
+        Next key
+    End If
+
+    ' Subtract positions from Benchmark
+    If Not bench.positions Is Nothing Then
+        For Each key In bench.positions
+            Set bPos = bench.positions(key)
+
+            If diffPort.positions.Exists(bPos.posID) Then
+                ' Position exists, update weight
+                diffPort.positions(bPos.posID).weight = diffPort.positions(bPos.posID).weight - bPos.weight
+            Else
+                ' Position does not exist, add with negative weight
+                Set newPos = bPos.Clone()
+                newPos.weight = -bPos.weight
+                diffPort.positions.Add newPos.posID, newPos
+            End If
+        Next key
+    End If
+
+    Set CreateDiffPortfolio = diffPort
+
+End Function
