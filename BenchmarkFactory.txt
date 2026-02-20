@@ -1,24 +1,5 @@
 Option Explicit
 
-Private Const BUCKETS_START_ROW As Long = 20
-Private Const MODELS_START_ROW As Long = 20
-Private Const PROFILE_MAPPING_START_ROW As Long = 20 ' TODO: Confirm column and row for Profile Mapping
-
-' Columns for Buckets
-Private Const COL_BUCKET_NAME As String = "B"
-Private Const COL_INSTRUMENT_ID As String = "C"
-Private Const COL_INSTRUMENT_NAME As String = "D"
-Private Const COL_WEIGHT As String = "E"
-
-' Columns for Models
-Private Const COL_MODEL_NAME As String = "J"
-Private Const COL_MODEL_BUCKET As String = "K"
-Private Const COL_MODEL_WEIGHT As String = "L"
-
-' Columns for Profile Mapping (Assuming a location, user specified it exists)
-Private Const COL_PROFILE_FUND_NAME As String = "P" ' Placeholder
-Private Const COL_PROFILE_DELTA As String = "Q" ' Placeholder
-
 Public Function ComputeBenchmark(targetPortfolio As Portfolio) As Portfolio
 
     Dim benchmark As New Portfolio
@@ -30,8 +11,8 @@ Public Function ComputeBenchmark(targetPortfolio As Portfolio) As Portfolio
 
     Dim defensiveModel As Dictionary
     Dim aggressiveModel As Dictionary
-    Set defensiveModel = LoadModelComposition("Defensive")
-    Set aggressiveModel = LoadModelComposition("Aggressive")
+    Set defensiveModel = LoadModelComposition("ModelDefensive")
+    Set aggressiveModel = LoadModelComposition("ModelAggressive")
 
     ' 2. Determine Interpolation Factor (Equity Delta)
     Dim equityDelta As Double
@@ -107,11 +88,20 @@ End Function
 
 Private Function LoadBuckets() As Dictionary
     Dim dict As New Dictionary
-    Dim ws As Worksheet
-    Set ws = ThisWorkbook.Worksheets("target weights")
-
+    Dim rng As Range
     Dim r As Long
-    r = BUCKETS_START_ROW
+
+    On Error Resume Next
+    Set rng = ThisWorkbook.Names("BucketsData").RefersToRange
+    On Error GoTo 0
+
+    If rng Is Nothing Then
+        Debug.Print "Error: Named range 'BucketsData' not found."
+        Set LoadBuckets = dict
+        Exit Function
+    End If
+
+    ' Assuming range columns: BucketName, InstrumentID, InstrumentName, Weight
 
     Dim bucketName As String
     Dim instrId As String
@@ -122,100 +112,115 @@ Private Function LoadBuckets() As Dictionary
 
     ' Try to get instrument details if available for the current date
     On Error Resume Next
-    ' Note: Data module is used here. Ensure Data module is accessible.
     Set instrDict = Data.GetInstruments(Date, True)
     On Error GoTo 0
 
-    Do While ws.Range(COL_BUCKET_NAME & r).Value <> ""
-        bucketName = ws.Range(COL_BUCKET_NAME & r).Value
-        instrId = ws.Range(COL_INSTRUMENT_ID & r).Value
-        weight = ws.Range(COL_WEIGHT & r).Value
+    For r = 1 To rng.Rows.Count
+        bucketName = rng.Cells(r, 1).Value
+        instrId = rng.Cells(r, 2).Value
+        ' Name is in column 3, skipping
+        weight = rng.Cells(r, 4).Value
 
-        If Not dict.Exists(bucketName) Then
-            Set port = New Portfolio
-            port.Name = bucketName
-            dict.Add bucketName, port
-        Else
-            Set port = dict(bucketName)
-        End If
-
-        Set pos = New Position
-        pos.posID = instrId
-        pos.weight = weight
-
-        If Not instrDict Is Nothing Then
-            If instrDict.Exists(instrId) Then
-                Set pos.posInstrument = instrDict(instrId)
+        If bucketName <> "" Then
+            If Not dict.Exists(bucketName) Then
+                Set port = New Portfolio
+                port.Name = bucketName
+                dict.Add bucketName, port
+            Else
+                Set port = dict(bucketName)
             End If
+
+            Set pos = New Position
+            pos.posID = instrId
+            pos.weight = weight
+
+            If Not instrDict Is Nothing Then
+                If instrDict.Exists(instrId) Then
+                    Set pos.posInstrument = instrDict(instrId)
+                End If
+            End If
+
+            port.positions.Add pos.posID, pos
         End If
-
-        port.positions.Add pos.posID, pos
-
-        r = r + 1
-    Loop
+    Next r
 
     Set LoadBuckets = dict
 End Function
 
-Private Function LoadModelComposition(modelName As String) As Dictionary
+Private Function LoadModelComposition(rangeName As String) As Dictionary
     Dim dict As New Dictionary
-    Dim ws As Worksheet
-    Set ws = ThisWorkbook.Worksheets("target weights")
-
+    Dim rng As Range
     Dim r As Long
-    r = MODELS_START_ROW
 
-    Dim currentModel As String
+    On Error Resume Next
+    Set rng = ThisWorkbook.Names(rangeName).RefersToRange
+    On Error GoTo 0
+
+    If rng Is Nothing Then
+        Debug.Print "Error: Named range '" & rangeName & "' not found."
+        Set LoadModelComposition = dict
+        Exit Function
+    End If
+
+    ' Assuming range columns: BucketName, Weight (2 columns)
+
     Dim bucketName As String
     Dim weight As Double
 
-    Do While ws.Range(COL_MODEL_NAME & r).Value <> ""
-        currentModel = ws.Range(COL_MODEL_NAME & r).Value
+    For r = 1 To rng.Rows.Count
+        bucketName = rng.Cells(r, 1).Value
 
-        If LCase(currentModel) = LCase(modelName) Then
-            bucketName = ws.Range(COL_MODEL_BUCKET & r).Value
-            weight = ws.Range(COL_MODEL_WEIGHT & r).Value
-
-            If dict.Exists(bucketName) Then
-                dict(bucketName) = dict(bucketName) + weight
-            Else
-                dict.Add bucketName, weight
+        If bucketName <> "" Then
+            On Error Resume Next
+            weight = CDbl(rng.Cells(r, 2).Value)
+            If Err.Number = 0 Then
+                If dict.Exists(bucketName) Then
+                    dict(bucketName) = dict(bucketName) + weight
+                Else
+                    dict.Add bucketName, weight
+                End If
             End If
+            On Error GoTo 0
         End If
-
-        r = r + 1
-    Loop
+    Next r
 
     Set LoadModelComposition = dict
 End Function
 
 Private Function LoadProfileMapping() As Dictionary
     Dim dict As New Dictionary
-    Dim ws As Worksheet
-    Set ws = ThisWorkbook.Worksheets("target weights")
-
+    Dim rng As Range
     Dim r As Long
-    r = PROFILE_MAPPING_START_ROW
+
+    On Error Resume Next
+    Set rng = ThisWorkbook.Names("ProfileMappingData").RefersToRange
+    On Error GoTo 0
+
+    If rng Is Nothing Then
+        Debug.Print "Error: Named range 'ProfileMappingData' not found."
+        Set LoadProfileMapping = dict
+        Exit Function
+    End If
+
+    ' Assuming range columns: FundName, EquityDelta
 
     Dim fundName As String
     Dim delta As Double
 
-    ' Loop until empty cell in fund name column
-    Do While ws.Range(COL_PROFILE_FUND_NAME & r).Value <> ""
-        fundName = ws.Range(COL_PROFILE_FUND_NAME & r).Value
+    For r = 1 To rng.Rows.Count
+        fundName = rng.Cells(r, 1).Value
 
-        ' Read delta, handle potential errors
-        On Error Resume Next
-        delta = CDbl(ws.Range(COL_PROFILE_DELTA & r).Value)
-        If Err.Number = 0 Then
-            If Not dict.Exists(fundName) Then
-                dict.Add fundName, delta
+        If fundName <> "" Then
+            On Error Resume Next
+            delta = CDbl(rng.Cells(r, 2).Value)
+            If Err.Number = 0 Then
+                If Not dict.Exists(fundName) Then
+                    dict.Add fundName, delta
+                End If
             End If
+            On Error GoTo 0
         End If
-        On Error GoTo 0
-
-        r = r + 1
-    Loop
+    Next r
 
     Set LoadProfileMapping = dict
 End Function
