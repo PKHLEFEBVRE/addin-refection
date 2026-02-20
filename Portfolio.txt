@@ -11,7 +11,7 @@ Public insurer As String
 Public custodian As String
 Public sales As String
 Public MandatType As String
-Public Type As String
+Public FundType As String
 Public AVType As String
 Public ccy As String
 Public profile As String

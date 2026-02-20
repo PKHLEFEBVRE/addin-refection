@@ -82,8 +82,8 @@ Public Static Function CreatePortfolio(ByVal line As Variant, ByVal columnsDict 
     If columnsDict.Exists("custodian") Then port.custodian = CStr(Replace(line(columnsDict("custodian")), """", ""))
     If columnsDict.Exists("sales") Then port.sales = CStr(Replace(line(columnsDict("sales")), """", ""))
 
-    ' Mapped properties change: accountType -> MandatType, added Type
-    If columnsDict.Exists("Type") Then port.Type = CStr(Replace(line(columnsDict("Type")), """", ""))
+    ' Mapped properties change: AccountType -> MandatType, Type -> FundType
+    If columnsDict.Exists("Type") Then port.FundType = CStr(Replace(line(columnsDict("Type")), """", ""))
     If columnsDict.Exists("AccountType") Then port.MandatType = CStr(Replace(line(columnsDict("AccountType")), """", ""))
 
     If columnsDict.Exists("AVType") Then port.AVType = CStr(Replace(line(columnsDict("AVType")), """", ""))
@@ -126,7 +126,7 @@ Public Sub LoadPositionsForType(portfolios As Dictionary, typeFilter As String, 
 
     For Each key In portfolios
         Set port = portfolios(key)
-        If LCase(port.Type) = LCase(typeFilter) Then
+        If LCase(port.FundType) = LCase(typeFilter) Then
             port.GetPositions dt
         End If
     Next key
@@ -140,7 +140,7 @@ Public Static Function CreateDiffPortfolio(port As Portfolio, bench As Portfolio
     Set diffPort = New Portfolio
 
     diffPort.Name = port.Name & " vs " & bench.Name
-    diffPort.Type = "Difference"
+    diffPort.FundType = "Difference"
     diffPort.MandatType = port.MandatType
     diffPort.ccy = port.ccy
 
