@@ -21,5 +21,11 @@ Public lastComputed As String
 Public CashAndTreso As Double
 Public AUM As Double
 Public exposureLimits As Dictionary
+Public positions As Dictionary
 
+Private Sub Class_Initialize()
 
+    Set exposureLimits = New Dictionary
+    Set positions = New Dictionary
+
+End Sub

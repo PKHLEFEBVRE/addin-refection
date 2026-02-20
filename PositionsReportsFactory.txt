@@ -1,259 +1,122 @@
 Option Explicit
 
-Public Static Function GetAllocationReportFromPositions(ByRef fundsPositions As Variant, _
-                                                   ByVal rowField As String, _
-                                                   ByVal colFields As Variant, _
-                                                   ByVal valueField As String) As Variant
-        
-    Dim inputData As Variant
-    inputData = makeInputData(fundsPositions)
-    
-    Dim pivot As Variant
-    pivot = PivotInMemory(inputData, rowField, colFields, valueField)
-    
-    GetAllocationReportFromPositions = pivot
-    
-End Function
+Public Function GetExposure(port As Portfolio, key1 As String, Optional key2 As String = "") As Dictionary
 
+    Dim exposure As New Dictionary
+    Dim pos As Position
+    Dim inst As Instrument
+    Dim posKey As Variant
+    Dim val1 As String, val2 As String
+    Dim compositeKey As String
+    Dim weight As Double
 
-Public Function makeInputData(ByVal fundsDict As Object) As Variant
-
-    Dim firstPos As Object, fKey As Variant, pKey As Variant
-    
-    For Each fKey In fundsDict
-        For Each pKey In fundsDict(fKey)
-            If Not fundsDict(fKey)(pKey).posInstrument Is Nothing Then
-                Set firstPos = fundsDict(fKey)(pKey)
-                Exit For
-            End If
-        Next pKey
-        If Not firstPos Is Nothing Then Exit For
-    Next fKey
-    
-    If firstPos Is Nothing Then Exit Function     ' dictionnaire vide
-
-    Dim colDict As Scripting.Dictionary
-    Set colDict = CreateObject("Scripting.Dictionary")
-    
-    ListPublicMembersVBIDE firstPos, colDict, False          'members of Position
-    If Not firstPos.posInstrument Is Nothing Then
-        ListPublicMembersVBIDE firstPos.posInstrument, colDict, True   'members of instrument
+    If port.positions Is Nothing Then
+        Set GetExposure = exposure
+        Exit Function
     End If
-    
-    If colDict.Exists("posInstrument") Then colDict.Remove ("posInstrument")
-    If colDict.Exists("Function") Then colDict.Remove ("Function")
-    
-    Dim count As Integer
-    count = 1
-    For Each fKey In colDict
-        colDict(fKey) = count
-        count = count + 1
-    Next fKey
-    
-    Dim nCols As Long: nCols = colDict.count
-    
-    Dim totalRows As Long
-    For Each fKey In fundsDict
-        If Not fundsDict(fKey) Is Nothing Then _
-            totalRows = totalRows + fundsDict(fKey).count
-    Next fKey
-    
-    Dim outArr() As Variant
-    ReDim outArr(1 To totalRows + 1, 1 To nCols)
-    
-    Dim r As Long: r = 1
-    Dim c As Long, fieldName As Variant
-    Dim posObj As Position, instObj As Instrument
-    
-    c = 1
-    For Each fieldName In colDict
-        outArr(1, c) = fieldName
-        c = c + 1
-    Next fieldName
-    
-    r = r + 1
-    
-    For Each fKey In fundsDict
-        If Not fundsDict(fKey) Is Nothing Then
-            For Each pKey In fundsDict(fKey)
-                If Not IsEmpty(fundsDict(fKey)(pKey)) Then
-                    Set posObj = fundsDict(fKey)(pKey)
-                    Set instObj = posObj.posInstrument
-                    
-                    For Each fieldName In colDict.Keys
-                        c = colDict(fieldName)
-                        
-                        If HasMemberVBIDE(posObj, fieldName) Then
-                            outArr(r, c) = CallByName(posObj, fieldName, VbGet)
-                        ElseIf Not instObj Is Nothing Then
-                            If HasMemberVBIDE(instObj, fieldName) And LCase(TypeName(CallByName(instObj, fieldName, VbGet))) <> "dictionary" Then
-                                outArr(r, c) = CallByName(instObj, fieldName, VbGet)
-                            End If
-                        End If
-                    Next fieldName
-                    
-                    r = r + 1
-                End If
-            Next pKey
+
+    For Each posKey In port.positions
+        Set pos = port.positions(posKey)
+        Set inst = pos.posInstrument
+
+        ' Get value for key1
+        val1 = GetValueForExposure(pos, inst, key1)
+
+        ' Get value for key2 if provided
+        If key2 <> "" Then
+            val2 = GetValueForExposure(pos, inst, key2)
+            compositeKey = val1 & "|" & val2
+        Else
+            compositeKey = val1
         End If
-    Next fKey
-    
-    makeInputData = outArr
-    
+
+        ' Sum weights
+        ' If weight is not calculated, fallback to amountBaseCur / AUM if AUM > 0
+        weight = pos.weight
+
+        If exposure.Exists(compositeKey) Then
+            exposure(compositeKey) = exposure(compositeKey) + weight
+        Else
+            exposure.Add compositeKey, weight
+        End If
+
+    Next posKey
+
+    Set GetExposure = exposure
+
 End Function
 
+Private Function GetValueForExposure(pos As Position, inst As Instrument, key As String) As String
 
-Private Sub ListPublicMembersVBIDE(obj As Object, _
-                                   dict As Scripting.Dictionary, _
-                                   Optional skipExists As Boolean = False)
-    Dim comp As VBIDE.VBComponent, cm As VBIDE.CodeModule
-    Dim lineTxt As String, i As Long, name As String
-    
-    Set comp = Application.VBE.VBProjects("a_ViaAddIn").VBComponents(TypeName(obj))
-    Set cm = comp.CodeModule
-    
-    For i = 1 To cm.CountOfLines
-        lineTxt = Trim$(cm.lines(i, 1))
-        
-        If lineTxt Like "Public * As *" Then
-           
-            name = Split(Split(lineTxt, " ")(1), "(")(0)
-            If (Not dict.Exists(name) Or Not skipExists) Then
-                If Not dict.Exists(name) Then _
-                    dict.Add name, dict.count + 1
-            End If
+    Dim val As Variant
+
+    ' Try to get from Instrument first
+    If Not inst Is Nothing Then
+        If HasMember(inst, key) Then
+            val = CallByName(inst, key, VbGet)
+            GetValueForExposure = CStr(val)
+            Exit Function
         End If
-    Next i
-End Sub
+    End If
 
+    ' Then try Position
+    If HasMember(pos, key) Then
+        val = CallByName(pos, key, VbGet)
+        GetValueForExposure = CStr(val)
+        Exit Function
+    End If
 
-Private Function HasMemberVBIDE(obj As Object, memberName As Variant) As Boolean
+    ' Fallback
+    GetValueForExposure = "N/A"
+
+End Function
+
+Private Function HasMember(obj As Object, memberName As String) As Boolean
     On Error Resume Next
     Call CallByName(obj, memberName, VbGet)
-    HasMemberVBIDE = (Err.Number = 0)
+    HasMember = (Err.Number = 0)
     Err.Clear
 End Function
 
 
-Private Function PivotInMemory(ByVal data As Variant, _
-                               ByVal rowField As String, _
-                               ByVal colFields As Variant, _
-                               ByVal valueField As String) As Variant
+Public Function GetAggregatedExposure(portfolios As Dictionary, key1 As String, Optional key2 As String = "") As Variant
 
-    Dim rowIndex As Long, valIndex As Long
-    Dim colIndices() As Long
-    Dim i As Long, j As Long, notFound As Boolean
+    Dim exposureDicts As New Dictionary
+    Dim uniqueKeys As New Dictionary
+    Dim portKey As Variant
+    Dim port As Portfolio
+    Dim expDict As Dictionary
+    Dim expKey As Variant
+    Dim result(0 To 1) As Variant ' 0: dict of dicts, 1: unique keys dict
 
-    For i = 1 To UBound(data, 2)
-        If data(1, i) = rowField Then rowIndex = i
-        If data(1, i) = valueField Then valIndex = i
-    Next i
-    
-    Dim msg As String, h As Variant
-    
-    If valIndex = 0 Then
-        msg = "Field not found in headers. Available fields are:" & vbCr & vbCr
-        For i = 1 To UBound(data, 2)
-            msg = msg & data(LBound(data, 2), i) & vbCr
-        Next i
-        MsgBox msg, vbExclamation
-        Exit Function
-    End If
-    
-    notFound = False
-    
-    ReDim colIndices(LBound(colFields) To UBound(colFields))
-    For j = LBound(colFields) To UBound(colFields)
-        For i = 1 To UBound(data, 2)
-            If LCase(data(1, i)) = LCase(colFields(j)) Then
-                colIndices(j) = i
-                Exit For
+    For Each portKey In portfolios
+        Set port = portfolios(portKey)
+
+        Set expDict = GetExposure(port, key1, key2)
+        exposureDicts.Add portKey, expDict
+
+        For Each expKey In expDict
+            If Not uniqueKeys.Exists(expKey) Then
+                uniqueKeys.Add expKey, expKey
             End If
-        Next i
-        If colIndices(j) = 0 Then
-            notFound = True
-        End If
-    Next j
+        Next expKey
+    Next portKey
 
-    If rowIndex = 0 Or notFound Then
-        msg = "Field not found in headers."
-        MsgBox msg, vbExclamation
-        Exit Function
-    End If
+    Set result(0) = exposureDicts
+    Set result(1) = uniqueKeys
 
-
-    Dim rowKeys As Dictionary: Set rowKeys = New Dictionary
-    Dim colKeys As Dictionary: Set colKeys = New Dictionary
-    Dim pivotDict As Dictionary: Set pivotDict = New Dictionary
-
-    Dim rowKey As Variant, colKey As Variant, comboKey As String
-    Dim val As Double
-
-    For i = 2 To UBound(data, 1)
-        rowKey = CStr(data(i, rowIndex))
-        colKey = ""
-        For j = LBound(colIndices) To UBound(colIndices)
-            colKey = colKey & CStr(data(i, colIndices(j)))
-            If j < UBound(colIndices) Then colKey = colKey & "|"
-        Next j
-        
-        comboKey = rowKey & "|" & colKey
-        val = CDbl(data(i, valIndex))
-
-        If Not rowKeys.Exists(rowKey) Then rowKeys.Add rowKey, True
-        If Not colKeys.Exists(colKey) Then colKeys.Add colKey, True
-
-        If pivotDict.Exists(comboKey) Then
-            pivotDict(comboKey) = pivotDict(comboKey) + val
-        Else
-            pivotDict(comboKey) = val
-        End If
-    Next i
-
-    Dim r As Long, c As Long
-    Dim result() As Variant
-    ReDim result(0 To rowKeys.count + UBound(colFields), 0 To colKeys.count)
-
-    result(0, 0) = "PivotInMemory"
-    c = 1
-    For Each colKey In colKeys.Keys
-        If UBound(colFields) = 0 Then
-            result(0, c) = CStr(colKey)
-        Else
-            For r = 0 To UBound(colFields)
-                If InStr(1, colKey, "|") = 0 Then
-                    result(r, c) = colKey
-                Else
-                    result(r, c) = Left(colKey, InStr(1, colKey, "|") - 1)
-                End If
-                
-                colKey = Right(colKey, Len(colKey) - InStr(1, colKey, "|"))
-            Next r
-        End If
-        c = c + 1
-    Next colKey
-
-    r = UBound(colFields) + 1
-    
-    For Each rowKey In rowKeys.Keys
-        result(r, 0) = CStr(rowKey)
-        c = 1
-        For Each colKey In colKeys.Keys
-            comboKey = rowKey & "|" & colKey
-            If pivotDict.Exists(comboKey) Then
-                result(r, c) = pivotDict(comboKey)
-            Else
-                result(r, c) = 0
-            End If
-            c = c + 1
-        Next colKey
-        r = r + 1
-    Next rowKey
-    
-    CommunFactory.SortArray result, UBound(colFields) + 1
-    
-    PivotInMemory = result
+    GetAggregatedExposure = result
 
 End Function
 
+Public Function GetExposureReport(portfolios As Dictionary, key1 As String, Optional key2 As String = "") As Variant
 
+    Dim aggData As Variant
+    aggData = GetAggregatedExposure(portfolios, key1, key2)
+
+    Dim table As Variant
+    table = CommunFactory.TurnExposureDictsToTable(aggData(0), aggData(1))
+
+    GetExposureReport = table
+
+End Function

@@ -1,0 +1,122 @@
+Option Explicit
+
+Public Static Function GetPortfoliosFromFile(ByVal path As String, ByVal dt As Date) As Dictionary
+
+    Dim lines() As Variant
+    lines = ExcelFactory.GetLinesFromExcelFile(path, , True)
+    If CommunFactory.isArrayEmpty(lines) Then
+        MsgBox "No portfolio referential found at:" & vbCr & vbCr & path, vbCritical, "Fatal"
+        Set GetPortfoliosFromFile = New Dictionary
+        Exit Function
+    End If
+
+    Dim port As Portfolio
+    Dim portfolios As Dictionary
+    Set portfolios = New Dictionary
+
+    Dim i As Integer, line As Variant, key As String, inventoryId As String
+
+    Dim columnsDict As Dictionary
+    Set columnsDict = createColumnsDictFromInventory(lines(1))
+
+    For i = LBound(lines) + 1 To UBound(lines)  'remove headers
+
+        line = lines(i)
+
+        ' Determine Key: Use InfinId if available, else Name
+        key = ""
+        If columnsDict.Exists("InfinId") Then
+            key = CStr(line(columnsDict("InfinId")))
+        End If
+
+        If key = "" And columnsDict.Exists("Name") Then
+            key = CStr(line(columnsDict("Name")))
+        End If
+
+        If key <> "" Then
+            Set port = CreatePortfolio(line, columnsDict)
+
+            ' Load inventory
+            ' Using InfinId as fundId if available, else Name
+            inventoryId = port.InfinId
+            If inventoryId = "" Then inventoryId = port.Name
+
+            If inventoryId <> "" Then
+                Set port.positions = Data.GetInventory(dt, inventoryId)
+            End If
+
+            If Not portfolios.Exists(key) Then
+                portfolios.Add key, port
+            Else
+                Debug.Print "Duplicate portfolio key: " & key
+            End If
+        End If
+
+    Next i
+
+    Set GetPortfoliosFromFile = portfolios
+
+End Function
+
+Private Function createColumnsDictFromInventory(ByVal line As Variant) As Dictionary
+
+    Dim c As Integer, columnsNumber As Dictionary
+    Set columnsNumber = New Dictionary
+
+    For c = 1 To UBound(line)
+        If Not columnsNumber.Exists(line(c)) Then
+            columnsNumber.Add line(c), c
+        End If
+    Next c
+
+    Set createColumnsDictFromInventory = columnsNumber
+
+End Function
+
+Public Static Function CreatePortfolio(ByVal line As Variant, ByVal columnsDict As Dictionary) As Portfolio
+
+    Dim port As Portfolio
+    Set port = New Portfolio
+
+    ' String properties
+    If columnsDict.Exists("Name") Then port.Name = CStr(Replace(line(columnsDict("Name")), """", ""))
+    If columnsDict.Exists("comment") Then port.comment = CStr(Replace(line(columnsDict("comment")), """", ""))
+    If columnsDict.Exists("InfinId") Then port.InfinId = CStr(Replace(line(columnsDict("InfinId")), """", ""))
+    If columnsDict.Exists("insuranceContract") Then port.insuranceContract = CStr(Replace(line(columnsDict("insuranceContract")), """", ""))
+    If columnsDict.Exists("accountName") Then port.accountName = CStr(Replace(line(columnsDict("accountName")), """", ""))
+    If columnsDict.Exists("client") Then port.client = CStr(Replace(line(columnsDict("client")), """", ""))
+    If columnsDict.Exists("insurer") Then port.insurer = CStr(Replace(line(columnsDict("insurer")), """", ""))
+    If columnsDict.Exists("custodian") Then port.custodian = CStr(Replace(line(columnsDict("custodian")), """", ""))
+    If columnsDict.Exists("sales") Then port.sales = CStr(Replace(line(columnsDict("sales")), """", ""))
+    If columnsDict.Exists("accountType") Then port.accountType = CStr(Replace(line(columnsDict("accountType")), """", ""))
+    If columnsDict.Exists("AVType") Then port.AVType = CStr(Replace(line(columnsDict("AVType")), """", ""))
+    If columnsDict.Exists("ccy") Then port.ccy = CStr(Replace(line(columnsDict("ccy")), """", ""))
+    If columnsDict.Exists("profile") Then port.profile = CStr(Replace(line(columnsDict("profile")), """", ""))
+    If columnsDict.Exists("composition") Then port.composition = CStr(Replace(line(columnsDict("composition")), """", ""))
+    If columnsDict.Exists("targetProfile") Then port.targetProfile = CStr(Replace(line(columnsDict("targetProfile")), """", ""))
+    If columnsDict.Exists("targetComposition") Then port.targetComposition = CStr(Replace(line(columnsDict("targetComposition")), """", ""))
+    If columnsDict.Exists("lastComputed") Then port.lastComputed = CStr(Replace(line(columnsDict("lastComputed")), """", ""))
+
+    ' Date properties
+    If columnsDict.Exists("creationDate") Then
+        If CStr(line(columnsDict("creationDate"))) <> "" Then
+            port.creationDate = CDate(CStr(Replace(line(columnsDict("creationDate")), """", "")))
+        End If
+    End If
+
+    ' Double properties
+    If columnsDict.Exists("CashAndTreso") Then
+        If CStr(line(columnsDict("CashAndTreso"))) <> "" Then
+            port.CashAndTreso = CDbl(Replace(line(columnsDict("CashAndTreso")), ".", Application.International(xlDecimalSeparator)))
+        End If
+    End If
+
+    If columnsDict.Exists("AUM") Then
+        If CStr(line(columnsDict("AUM"))) <> "" Then
+            port.AUM = CDbl(Replace(line(columnsDict("AUM")), ".", Application.International(xlDecimalSeparator)))
+        End If
+    End If
+
+    Set CreatePortfolio = port
+
+End Function

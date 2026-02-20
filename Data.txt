@@ -1,48 +1,48 @@
 Option Explicit
- 
+
 Public theReferentialInstance As New Referential
 
 Public Static Function GetReferential() As Referential
-    
+
     If data.theReferentialInstance Is Nothing Then
         Debug.Print "Creation of new instance of Referential"
     Else
         'Debug.Print "An instance of Referential is already created: Good"
     End If
-    
+
     Set GetReferential = data.theReferentialInstance
-    
+
 End Function
 
 
 Public Sub ResetSingleton()
 
     Set theReferentialInstance = Nothing
-    
+
 End Sub
 
 
-Public Function GetInventory(ByVal dt As Date, ByVal mandateId As String) As Dictionary
+Public Function GetInventory(ByVal dt As Date, ByVal fundId As String) As Dictionary
 
     On Error GoTo errorHandler
 
     Dim ref As Referential
     Set ref = data.GetReferential()
-        
+
     Dim positions As Dictionary
-    Set positions = ref.GetInventoryInfin(dt, mandateId)
-    
+    Set positions = ref.GetInventoryInfin(dt, fundId)
+
     If positions Is Nothing Then
-        Debug.Print "cobDate = " & dt & " with no position found in inventory of mandate " & mandateId
+        Debug.Print "cobDate = " & dt & " with no position found in inventory of fund " & fundId
     Else
-        Debug.Print "cobDate = " & dt & " with " & positions.count & " positions found in inventory of mandate " & mandateId
+        Debug.Print "cobDate = " & dt & " with " & positions.count & " positions found in inventory of fund " & fundId
     End If
-    
+
     Set GetInventory = positions
     Exit Function
-    
+
 errorHandler:
-    MsgBox "An error occurred on mandate " & mandateId & " on date " & dt & "." & vbCr & vbCr & Err.Number & " - " & Err.Description, vbExclamation, "Error"
+    MsgBox "An error occurred on fund " & fundId & " on date " & dt & "." & vbCr & vbCr & Err.Number & " - " & Err.Description, vbExclamation, "Error"
     Set GetInventory = New Dictionary
 End Function
 
@@ -52,19 +52,38 @@ Public Function GetInstruments(ByVal dt As Date, Optional byInfinId As Boolean) 
 
     Dim ref As Referential
     Set ref = data.GetReferential()
-        
+
     Dim instruments As Dictionary
     Set instruments = ref.GetInstrumentsInfinByKey(dt, byInfinId)
-    
+
     If instruments Is Nothing Then
         Debug.Print "cobDate = " & dt & " with no instruments found."
     Else
         If byInfinId Then Debug.Print "cobDate = Referential " & dt & " with " & instruments.count & " instruments found." _
         Else: Debug.Print "cobDate = Referential " & dt & " with " & instruments.count & " asset classes found."
     End If
-    
+
     Set GetInstruments = instruments
-    
+
+End Function
+
+
+Public Function GetPortfolios(ByVal dt As Date) As Dictionary
+
+    Dim ref As Referential
+    Set ref = data.GetReferential()
+
+    Dim portfolios As Dictionary
+    Set portfolios = ref.GetPortfoliosInfinByKey(dt)
+
+    If portfolios Is Nothing Then
+        Debug.Print "cobDate = " & dt & " with no portfolios found."
+    Else
+        Debug.Print "cobDate = Referential " & dt & " with " & portfolios.count & " portfolios found."
+    End If
+
+    Set GetPortfolios = portfolios
+
 End Function
 
 
@@ -72,12 +91,7 @@ Public Function GetConfiguration() As Configuration
 
     Dim ref As Referential
     Set ref = data.GetReferential()
-        
+
     Set GetConfiguration = ref.GetConfiguration
-    
+
 End Function
-
-
-
-
-

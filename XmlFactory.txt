@@ -2,15 +2,15 @@
 Private Function LoadXmlDoc(xmlPath As String) As MSXML2.DOMDocument60
 
     Dim doc As New MSXML2.DOMDocument60
-    
+
     doc.async = False ' one time load
-    
+
     If Not doc.Load(xmlPath) Then
         Err.Raise vbObjectError + 1000, , "Failed to load XML: " & doc.parseError.reason
     End If
-    
+
     Set LoadXmlDoc = doc
-    
+
 End Function
 
 
@@ -18,37 +18,37 @@ Private Function BuildSecbaseLookup(xmlDoc As MSXML2.DOMDocument60) As Dictionar
 
     Dim lookup As New Dictionary
     Dim node   As MSXML2.IXMLDOMNode
-    
+
     For Each node In xmlDoc.SelectNodes("//Secbase")
         lookup(node.SelectSingleNode("Isin").Text) = node.SelectSingleNode("SecName").Text
     Next
-    
+
     Set BuildSecbaseLookup = lookup
-    
+
 End Function
 
 
-Private Sub AddSecurityPositions(xmlDoc As MSXML2.DOMDocument60, positions As Dictionary, names As Dictionary, ByVal mandate As String, ByRef instruments As Dictionary)
+Private Sub AddSecurityPositions(xmlDoc As MSXML2.DOMDocument60, positions As Dictionary, names As Dictionary, ByVal fundId As String, ByRef instruments As Dictionary)
 
     Dim spNode As MSXML2.IXMLDOMNode
     Dim pos As Position
-    
+
     Dim config As New Configuration
     Dim assetClass As Variant, posInstrument As Instrument, cashPosition As Position
     Dim aum As Double, tick As Variant, isin As Variant
-    
+
     aum = 0
     For Each posID In positions
         aum = aum + positions(posID).amountBaseCur
     Next posID
-    
+
     For Each spNode In xmlDoc.SelectNodes("//Secpos")
-        
+
         Set posInstrument = Nothing
         Set cashPosition = Nothing
-        
-        If spNode.ParentNode.ParentNode.Attributes.getNamedItem("ContId").Text = mandate Then
-        
+
+        If spNode.ParentNode.ParentNode.Attributes.getNamedItem("ContId").Text = fundId Then
+
             For Each assetClass In config.validInstrumentsAssetClassesForBDLReferential
                 If instruments.Exists(assetClass) Then
                     For Each tick In instruments(assetClass)
@@ -63,26 +63,26 @@ Private Sub AddSecurityPositions(xmlDoc As MSXML2.DOMDocument60, positions As Di
                 End If
                 If Not posInstrument Is Nothing Then Exit For
             Next assetClass
-            
+
             If posInstrument Is Nothing Then
-                MsgBox ("Mandat " & mandate & "Unable to find " & spNode.SelectSingleNode("Isin").Text & _
+                MsgBox ("Fund " & fundId & "Unable to find " & spNode.SelectSingleNode("Isin").Text & _
     " in the referential, please create it in Infin and replace the referential by the new one in the inventory folder.")
                 Exit Sub
             End If
-            
-            
+
+
             For Each tick In positions
                 If LCase(positions(tick).ccy) = LCase(spNode.SelectSingleNode("PriceCcy").Text) Then
                     Set cashPosition = positions(tick)
                     Exit For
                 End If
             Next tick
-            
+
             If cashPosition Is Nothing Then
                 Dim manualFx As Double
                 manualFx = 1#
                 If spNode.SelectSingleNode("PriceCcy").Text = "BRL" Then manualFx = 0.16
-                MsgBox ("Mandat " & mandate & "Unable to find the " & spNode.SelectSingleNode("PriceCcy").Text & " in the cash accounts, setting it to 0 and FX rate at " & manualFx)
+                MsgBox ("Fund " & fundId & "Unable to find the " & spNode.SelectSingleNode("PriceCcy").Text & " in the cash accounts, setting it to 0 and FX rate at " & manualFx)
                 Set cashPosition = PositionFactory.CreatePosition( _
                     "", _
                     spNode.ParentNode.ParentNode.Attributes.getNamedItem("ContId").Text, _
@@ -98,8 +98,8 @@ Private Sub AddSecurityPositions(xmlDoc As MSXML2.DOMDocument60, positions As Di
                     Nothing _
                 )
             End If
-            
-            
+
+
             Set pos = PositionFactory.CreatePosition( _
                 posInstrument.instrumentId, _
                 spNode.ParentNode.ParentNode.Attributes.getNamedItem("ContId").Text, _
@@ -117,41 +117,41 @@ Private Sub AddSecurityPositions(xmlDoc As MSXML2.DOMDocument60, positions As Di
 
             positions.Add pos.posID, pos
             aum = aum + pos.amountBaseCur
-            
+
         End If
-        
+
     Next spNode
-    
+
     If aum > 0 And positions.count > 0 Then
         For Each posID In positions
             positions(posID).weight = positions(posID).amountBaseCur / aum
         Next posID
     End If
-    
+
 End Sub
 
 
 
-Private Sub AddCashPositions(xmlDoc As MSXML2.DOMDocument60, positions As Dictionary, ByVal mandate As String, ByRef instruments As Dictionary)
-    
+Private Sub AddCashPositions(xmlDoc As MSXML2.DOMDocument60, positions As Dictionary, ByVal fundId As String, ByRef instruments As Dictionary)
+
     Dim pos As Position, fx As Double, posInstrument As Instrument
     Dim contEl As MSXML2.IXMLDOMElement
     Dim cpNode As MSXML2.IXMLDOMNode
-    
+
     For Each cpNode In xmlDoc.SelectNodes("//Cashpos")
-        
+
         Set posInstrument = Nothing
-        
-        If cpNode.ParentNode.ParentNode.Attributes.getNamedItem("ContId").Text = mandate Then
-        
+
+        If cpNode.ParentNode.ParentNode.Attributes.getNamedItem("ContId").Text = fundId Then
+
             If instruments("cash").Exists(cpNode.SelectSingleNode("AssetCcy").Text) Then _
                 Set posInstrument = instruments("cash")(cpNode.SelectSingleNode("AssetCcy").Text)(cpNode.SelectSingleNode("AssetCcy").Text)
-            
+
             fx = 1#
             If CDbl(cpNode.SelectSingleNode("balBook").Text) <> 0 Then fx = CDbl(cpNode.SelectSingleNode("PosBalRefCcy").Text) / CDbl(cpNode.SelectSingleNode("balBook").Text)
-            
-            
-            
+
+
+
             Set pos = PositionFactory.CreatePosition( _
                 posInstrument.instrumentId, _
                 cpNode.ParentNode.ParentNode.Attributes.getNamedItem("ContId").Text, _
@@ -166,19 +166,19 @@ Private Sub AddCashPositions(xmlDoc As MSXML2.DOMDocument60, positions As Dictio
                 fx, _
                 posInstrument _
             )
-            
+
             'If pos.qty <> 0 Then positions.Add pos.posID, pos
             positions.Add pos.posID, pos
-            
+
         End If
-        
+
     Next cpNode
-    
+
 End Sub
 
 
 
-Public Function CreatePositionsDictFromXmlPath(path As String, ByVal mandateId As String, ByRef instruments As Dictionary) As Dictionary
+Public Function CreatePositionsDictFromXmlPath(path As String, ByVal fundId As String, ByRef instruments As Dictionary) As Dictionary
 
     Dim xmlDoc As MSXML2.DOMDocument60
     Dim positions  As New Dictionary
@@ -187,18 +187,18 @@ Public Function CreatePositionsDictFromXmlPath(path As String, ByVal mandateId A
     Set xmlDoc = LoadXmlDoc(path)
     Set secbaseDict = BuildSecbaseLookup(xmlDoc)
 
-    AddCashPositions xmlDoc, positions, mandateId, instruments
-    AddSecurityPositions xmlDoc, positions, secbaseDict, mandateId, instruments
-    
+    AddCashPositions xmlDoc, positions, fundId, instruments
+    AddSecurityPositions xmlDoc, positions, secbaseDict, fundId, instruments
+
     Dim pos As Variant, aum As Double
     aum = 0
-    
+
     For Each pos In positions
         aum = aum + positions(pos).amountBaseCur
     Next pos
-    
+
     If aum > 0 And positions.count > 0 Then
         Set CreatePositionsDictFromXmlPath = positions
     End If
-    
+
 End Function
