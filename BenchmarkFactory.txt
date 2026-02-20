@@ -1,0 +1,261 @@
+Option Explicit
+
+Private Const BUCKETS_START_ROW As Long = 20
+Private Const MODELS_START_ROW As Long = 20
+Private Const PROFILE_MAPPING_START_ROW As Long = 20 ' TODO: Confirm column and row for Profile Mapping
+
+' Columns for Buckets
+Private Const COL_BUCKET_NAME As String = "B"
+Private Const COL_INSTRUMENT_ID As String = "C"
+Private Const COL_INSTRUMENT_NAME As String = "D"
+Private Const COL_WEIGHT As String = "E"
+
+' Columns for Models
+Private Const COL_MODEL_NAME As String = "J"
+Private Const COL_MODEL_BUCKET As String = "K"
+Private Const COL_MODEL_WEIGHT As String = "L"
+
+' Columns for Profile Mapping (Assuming a location, user specified it exists)
+Private Const COL_PROFILE_FUND_NAME As String = "P" ' Placeholder
+Private Const COL_PROFILE_DELTA As String = "Q" ' Placeholder
+
+Public Function ComputeBenchmark(targetPortfolio As Portfolio) As Portfolio
+
+    Dim benchmark As New Portfolio
+    benchmark.Name = "Benchmark for " & targetPortfolio.Name
+
+    ' 1. Load Data
+    Dim buckets As Dictionary
+    Set buckets = LoadBuckets()
+
+    Dim defensiveModel As Dictionary
+    Dim aggressiveModel As Dictionary
+    Set defensiveModel = LoadModelComposition("Defensive")
+    Set aggressiveModel = LoadModelComposition("Aggressive")
+
+    ' 2. Determine Interpolation Factor (Equity Delta)
+    Dim equityDelta As Double
+    equityDelta = GetEquityDelta(targetPortfolio)
+
+    ' 3. Interpolate Bucket Weights
+    Dim interpolatedBuckets As Dictionary
+    Set interpolatedBuckets = InterpolateModels(defensiveModel, aggressiveModel, equityDelta)
+
+    ' 4. Construct Benchmark Portfolio
+    Dim bucketName As Variant
+    Dim bucketPort As Portfolio
+    Dim bucketWeight As Double
+    Dim pos As Position
+    Dim newPos As Position
+
+    For Each bucketName In interpolatedBuckets.Keys
+        bucketWeight = interpolatedBuckets(bucketName)
+
+        If bucketWeight > 0 Then
+            If buckets.Exists(bucketName) Then
+                Set bucketPort = buckets(bucketName)
+
+                For Each pos In bucketPort.positions.Items
+                    Set newPos = pos.Clone()
+                    newPos.weight = newPos.weight * bucketWeight
+                    AddPositionToBenchmark benchmark, newPos
+                Next pos
+            Else
+                Debug.Print "Warning: Bucket '" & bucketName & "' found in model but not defined in Buckets table."
+            End If
+        End If
+    Next bucketName
+
+    Set ComputeBenchmark = benchmark
+
+End Function
+
+Private Function GetEquityDelta(port As Portfolio) As Double
+    ' Try to look up Equity Delta from the Profile Mapping table using Portfolio Name
+    ' If not found, try using the portfolio's profile property directly
+
+    Dim mapping As Dictionary
+    Set mapping = LoadProfileMapping()
+
+    Dim delta As Double
+    Dim found As Boolean
+    found = False
+
+    If mapping.Exists(port.Name) Then
+        delta = mapping(port.Name)
+        found = True
+    End If
+
+    If Not found Then
+        ' Fallback to port.profile if it's numeric
+        On Error Resume Next
+        delta = CDbl(port.profile)
+        If Err.Number = 0 Then found = True
+        On Error GoTo 0
+    End If
+
+    If Not found Then
+        Debug.Print "Warning: Could not determine Equity Delta for " & port.Name & ". Defaulting to 0."
+        delta = 0
+    End If
+
+    ' Ensure range 0-1
+    If delta > 1 Then delta = delta / 100
+
+    GetEquityDelta = delta
+End Function
+
+Private Function LoadBuckets() As Dictionary
+    Dim dict As New Dictionary
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Worksheets("target weights")
+
+    Dim r As Long
+    r = BUCKETS_START_ROW
+
+    Dim bucketName As String
+    Dim instrId As String
+    Dim weight As Double
+    Dim port As Portfolio
+    Dim pos As Position
+    Dim instrDict As Dictionary
+
+    ' Try to get instrument details if available for the current date
+    On Error Resume Next
+    ' Note: Data module is used here. Ensure Data module is accessible.
+    Set instrDict = Data.GetInstruments(Date, True)
+    On Error GoTo 0
+
+    Do While ws.Range(COL_BUCKET_NAME & r).Value <> ""
+        bucketName = ws.Range(COL_BUCKET_NAME & r).Value
+        instrId = ws.Range(COL_INSTRUMENT_ID & r).Value
+        weight = ws.Range(COL_WEIGHT & r).Value
+
+        If Not dict.Exists(bucketName) Then
+            Set port = New Portfolio
+            port.Name = bucketName
+            dict.Add bucketName, port
+        Else
+            Set port = dict(bucketName)
+        End If
+
+        Set pos = New Position
+        pos.posID = instrId
+        pos.weight = weight
+
+        If Not instrDict Is Nothing Then
+            If instrDict.Exists(instrId) Then
+                Set pos.posInstrument = instrDict(instrId)
+            End If
+        End If
+
+        port.positions.Add pos.posID, pos
+
+        r = r + 1
+    Loop
+
+    Set LoadBuckets = dict
+End Function
+
+Private Function LoadModelComposition(modelName As String) As Dictionary
+    Dim dict As New Dictionary
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Worksheets("target weights")
+
+    Dim r As Long
+    r = MODELS_START_ROW
+
+    Dim currentModel As String
+    Dim bucketName As String
+    Dim weight As Double
+
+    Do While ws.Range(COL_MODEL_NAME & r).Value <> ""
+        currentModel = ws.Range(COL_MODEL_NAME & r).Value
+
+        If LCase(currentModel) = LCase(modelName) Then
+            bucketName = ws.Range(COL_MODEL_BUCKET & r).Value
+            weight = ws.Range(COL_MODEL_WEIGHT & r).Value
+
+            If dict.Exists(bucketName) Then
+                dict(bucketName) = dict(bucketName) + weight
+            Else
+                dict.Add bucketName, weight
+            End If
+        End If
+
+        r = r + 1
+    Loop
+
+    Set LoadModelComposition = dict
+End Function
+
+Private Function LoadProfileMapping() As Dictionary
+    Dim dict As New Dictionary
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Worksheets("target weights")
+
+    Dim r As Long
+    r = PROFILE_MAPPING_START_ROW
+
+    Dim fundName As String
+    Dim delta As Double
+
+    ' Loop until empty cell in fund name column
+    Do While ws.Range(COL_PROFILE_FUND_NAME & r).Value <> ""
+        fundName = ws.Range(COL_PROFILE_FUND_NAME & r).Value
+
+        ' Read delta, handle potential errors
+        On Error Resume Next
+        delta = CDbl(ws.Range(COL_PROFILE_DELTA & r).Value)
+        If Err.Number = 0 Then
+            If Not dict.Exists(fundName) Then
+                dict.Add fundName, delta
+            End If
+        End If
+        On Error GoTo 0
+
+        r = r + 1
+    Loop
+
+    Set LoadProfileMapping = dict
+End Function
+
+
+Private Function InterpolateModels(defensive As Dictionary, aggressive As Dictionary, delta As Double) As Dictionary
+    Dim result As New Dictionary
+    Dim bucket As Variant
+    Dim wDef As Double
+    Dim wAgg As Double
+    Dim wFinal As Double
+
+    ' Union of keys
+    Dim allBuckets As New Dictionary
+    For Each bucket In defensive.Keys: allBuckets(bucket) = 1: Next bucket
+    For Each bucket In aggressive.Keys: allBuckets(bucket) = 1: Next bucket
+
+    For Each bucket In allBuckets.Keys
+        wDef = 0
+        If defensive.Exists(bucket) Then wDef = defensive(bucket)
+
+        wAgg = 0
+        If aggressive.Exists(bucket) Then wAgg = aggressive(bucket)
+
+        ' Linear Interpolation:
+        ' Weight = wDef + (wAgg - wDef) * Delta
+        ' Delta is 0 (Defensive) to 1 (Aggressive)
+
+        wFinal = wDef + (wAgg - wDef) * delta
+
+        If wFinal <> 0 Then result.Add bucket, wFinal
+    Next bucket
+
+    Set InterpolateModels = result
+End Function
+
+Private Sub AddPositionToBenchmark(bench As Portfolio, newPos As Position)
+    If bench.positions.Exists(newPos.posID) Then
+        bench.positions(newPos.posID).weight = bench.positions(newPos.posID).weight + newPos.weight
+    Else
+        bench.positions.Add newPos.posID, newPos
+    End If
+End Sub
