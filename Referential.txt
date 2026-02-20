@@ -1,0 +1,113 @@
+Option Explicit
+
+Private PositionsByDateByMandateId As New Dictionary
+Private InstrumentsInfinByKey As New Dictionary
+
+Public name As String
+
+
+Private Sub Class_Initialize()
+
+    If Not Me Is data.theReferentialInstance Then Err.Raise 5
+    name = "Single Instance of the Referential"
+
+End Sub
+   
+    
+Public Property Get GetInventoryInfin(ByRef dt As Date, ByRef mandateId As String) As Dictionary
+    
+    Dim positionsByDate As Dictionary
+    
+    If PositionsByDateByMandateId.Exists(mandateId) Then
+        
+        Set positionsByDate = PositionsByDateByMandateId(mandateId)
+    
+    Else
+    
+        Set positionsByDate = New Dictionary
+        PositionsByDateByMandateId.Add mandateId, positionsByDate
+                
+    End If
+    
+    
+    Dim positions As Dictionary
+    
+    If positionsByDate.Exists(dt) Then
+        
+        Set positions = positionsByDate(dt)
+        
+    Else
+        
+        Dim path As String
+        Dim config As New Configuration
+        
+        If config.FundsThroughXml.Exists(mandateId) Then
+        
+            Set positions = PositionFactory.GetPositionsByDateFromXmlFile(dt, mandateId)
+        
+        Else
+        
+            path = config.CreateInventoryCsvPath(dt, mandateId)
+            Set positions = PositionFactory.GetPositionsByDateFromInfinCsvFile(path, dt, mandateId)
+        
+        End If
+        
+        positionsByDate.Add dt, positions
+        
+    End If
+    
+    Set GetInventoryInfin = positions
+    
+End Property
+
+
+
+Public Property Get GetInstrumentsInfinByKey(ByRef dt As Date, byInfinId As Boolean) As Dictionary
+
+    Dim InstrumentsByDate As Dictionary
+    Dim path As String, booleanStr As String
+    Dim config As New Configuration
+    
+    booleanStr = CStr(byInfinId)
+    
+    
+    If InstrumentsInfinByKey.Exists(dt) Then
+    
+        Set InstrumentsByDate = InstrumentsInfinByKey(dt)
+    
+    Else
+        
+        Set InstrumentsByDate = New Dictionary
+        InstrumentsInfinByKey.Add dt, InstrumentsByDate
+        
+    End If
+    
+    
+    Dim instruments As Dictionary
+    
+    If InstrumentsByDate.Exists(booleanStr) Then
+    
+        Set instruments = InstrumentsInfinByKey(dt)(booleanStr)
+            
+    Else
+        
+        path = config.CreateInstrumentsReferentialPath(dt)
+        Set instruments = InstrumentFactory.GetInstrumentsFromFile(path, byInfinId)
+        InstrumentsInfinByKey(dt).Add booleanStr, instruments
+    
+    End If
+        
+    Set GetInstrumentsInfinByKey = instruments
+    
+End Property
+
+Public Property Get GetConfiguration() As Configuration
+
+    Set GetConfiguration = New Configuration
+    
+End Property
+
+
+
+
+

@@ -1,0 +1,5 @@
+Option Explicit
+
+Public Function CreateBloomberWrapper() As BloombergRequestWrapper
+    Set CreateBloomberWrapper = New BloombergRequestWrapper
+End Function

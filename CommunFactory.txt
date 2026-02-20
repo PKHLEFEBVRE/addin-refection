@@ -1,0 +1,1334 @@
+Public Function isArrayEmpty(myArr As Variant) As Boolean
+
+    If IsArray(myArr) = False Then isArrayEmpty = True
+    
+    On Error Resume Next
+    If UBound(myArr) < LBound(myArr) Then
+        isArrayEmpty = True
+        Exit Function
+    Else
+        isArrayEmpty = False
+    End If
+
+End Function
+
+Public Function WorksheetExists(wb As Workbook, shtName As String) As Boolean
+
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = wb.Worksheets(shtName)
+    WorksheetExists = Not ws Is Nothing
+    On Error GoTo 0
+    
+End Function
+
+
+Public Function CreateAllFoldersOfPath(ByVal path As String) As String
+    
+    Dim i As Integer
+    
+    For i = 1 To Len(path)
+        If Mid(path, i, 1) = "\" Then
+            If Dir(Left(path, i), vbDirectory) = "" Then
+                MkDir Left(path, i)
+            End If
+        End If
+    Next i
+
+End Function
+
+
+Public Function SumRows2D(arr As Variant, Optional KeepIndex As Boolean = True) As Variant
+
+    Dim rL As Long, rU As Long, cL As Long, cU As Long
+    Dim r As Long, c As Long, i As Long
+    Dim res() As Variant
+    Dim s As Double
+
+    If Not IsArray(arr) Then Exit Function
+
+    rL = LBound(arr, 1): rU = UBound(arr, 1)
+    cL = LBound(arr, 2): cU = UBound(arr, 2)
+
+    If KeepIndex Then
+    
+        ReDim res(1 To rU - rL + 1, 1 To 2)
+        For r = rL To rU
+            s = 0
+            For c = cL + 1 To cU
+                If IsNumeric(arr(r, c)) Then
+                    s = s + CDbl(arr(r, c))
+                ElseIf Len(arr(r, c) & vbNullString) > 0 Then
+                    s = s + val(arr(r, c))
+                End If
+            Next c
+            res(r - rL + 1, 1) = arr(r, cL)  'index (first column)
+            res(r - rL + 1, 2) = s           'sum
+        Next r
+        
+    Else
+    
+        ReDim res(1 To rU - rL + 1, 1 To 1)
+        For r = rL To rU
+            s = 0
+            For c = cL + 1 To cU
+                If IsNumeric(arr(r, c)) Then
+                    s = s + CDbl(arr(r, c))
+                ElseIf Len(arr(r, c) & vbNullString) > 0 Then
+                    s = s + val(arr(r, c))
+                End If
+            Next c
+            res(r - rL + 1, 1) = s
+        Next r
+        
+    End If
+
+    SumRows2D = res
+    
+End Function
+
+
+Public Function FilterColumnsByHeaderContains(arr As Variant, filterText As Variant, Optional exactMatch As Boolean) As Variant
+
+    Dim cL As Long, cU As Long, rL As Long, rU As Long
+    Dim c As Long, r As Long, i As Long
+    Dim keepCols() As Long, count As Long
+    Dim filters() As String
+    
+    If IsArray(filterText) Then
+        ReDim filters(0 To UBound(filterText) - LBound(filterText))
+        For i = LBound(filterText) To UBound(filterText)
+            filters(i - LBound(filterText)) = LCase(CStr(filterText(i)))
+        Next i
+    Else
+        ReDim filters(0 To 0)
+        filters(0) = LCase(CStr(filterText))
+    End If
+    
+    If Not IsArray(arr) Then Exit Function
+    
+    rL = LBound(arr, 1):  rU = UBound(arr, 1)
+    cL = LBound(arr, 2):  cU = UBound(arr, 2)
+    
+    ReDim keepCols(0 To cU - cL)
+    keepCols(0) = cL
+    count = 1
+    
+    For c = cL + 1 To cU
+        Dim matchAll As Boolean: matchAll = True
+        
+        For i = 0 To UBound(filters)
+            Dim cellVal As String
+            cellVal = LCase(CStr(arr(rL + i, c)))
+            
+            If rL + i > rU Then
+                matchAll = False
+                Exit For
+            End If
+            
+            If exactMatch Then
+                If cellVal <> filters(i) Then
+                    matchAll = False
+                    Exit For
+                End If
+            Else
+                If InStr(1, cellVal, filters(i)) = 0 Then
+                    matchAll = False
+                    Exit For
+                End If
+            End If
+        Next i
+        
+        If matchAll Then
+            keepCols(count) = c
+            count = count + 1
+        End If
+    Next c
+    
+    If count = 1 Then Exit Function
+    
+    Dim result() As Variant
+    ReDim result(rL To rU, 1 To count)
+    
+    Dim cc As Long
+    For cc = 1 To count
+        For r = rL To rU
+            result(r, cc) = arr(r, keepCols(cc - 1))
+        Next r
+    Next cc
+    
+    FilterColumnsByHeaderContains = result
+    
+End Function
+
+
+Public Sub SortArray(ByRef arr As Variant, Optional ByVal SortLevels As Long = 1)
+    If Not IsArray(arr) Then Exit Sub
+
+    If nDim(arr) = 2 Then
+        ' Need at least two columns to sort (since you skip the first one)
+        If UBound(arr, 2) < LBound(arr, 2) + 1 Then Exit Sub
+
+        ' If asking for 2 sort levels, ensure there are at least 2 rows
+        If SortLevels = 2 And UBound(arr, 1) < LBound(arr, 1) + 1 Then SortLevels = 1
+
+        ' Keep your original convention: skip the first column
+        QuickSortUnified arr, LBound(arr, 2) + 1, UBound(arr, 2), SortLevels
+    Else
+        ' 1D array: sort the whole span
+        If UBound(arr) <= LBound(arr) Then Exit Sub
+        SortLevels = 1
+        QuickSortUnified arr, LBound(arr), UBound(arr), SortLevels
+    End If
+End Sub
+
+
+Private Function nDim(ByVal vArray As Variant) As Long
+    ' Purpose: get array dimension (MS)
+    Dim dimnum     As Long
+    Dim ErrorCheck As Long    ' OP: As Variant
+    On Error GoTo FinalDimension
+    
+    For dimnum = 1 To 60        ' 60 being the absolute dimensions limitation
+        ErrorCheck = LBound(vArray, dimnum)
+    Next
+    ' It's good use to formally exit a procedure before error handling
+    ' (though theoretically this wouldn't needed in this special case - see comment)
+    Exit Function
+    
+FinalDimension:
+    nDim = dimnum - 1
+
+End Function
+
+
+Private Sub QuickSortUnified(ByRef arr As Variant, ByVal leftIndex As Long, ByVal rightIndex As Long, ByVal SortLevels As Long)
+    Dim i As Long, j As Long
+    Dim pivotValue1 As Variant, pivotValue2 As Variant
+    Dim is1D As Boolean
+    
+    ' Check if array is 1D or 2D
+    On Error Resume Next
+    is1D = (UBound(arr, 2) = 0) ' will error for 1D
+    If Err.Number <> 0 Then
+        is1D = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+    
+    If leftIndex >= rightIndex Then Exit Sub
+    
+    ' Choose pivot
+    If is1D Then
+        pivotValue1 = arr((leftIndex + rightIndex) \ 2)
+    Else
+        pivotValue1 = arr(LBound(arr, 1), (leftIndex + rightIndex) \ 2)
+        If SortLevels = 2 Then
+            pivotValue2 = arr(LBound(arr, 1) + 1, (leftIndex + rightIndex) \ 2)
+        End If
+    End If
+    
+    i = leftIndex
+    j = rightIndex
+    
+    Do
+        If is1D Then
+            Do While arr(i) < pivotValue1
+                i = i + 1
+            Loop
+            Do While arr(j) > pivotValue1
+                j = j - 1
+            Loop
+        Else
+            Do While (arr(LBound(arr, 1), i) < pivotValue1) Or _
+                     (SortLevels = 2 And arr(LBound(arr, 1), i) = pivotValue1 And arr(LBound(arr, 1) + 1, i) < pivotValue2)
+                i = i + 1
+            Loop
+            
+            Do While (arr(LBound(arr, 1), j) > pivotValue1) Or _
+                     (SortLevels = 2 And arr(LBound(arr, 1), j) = pivotValue1 And arr(LBound(arr, 1) + 1, j) > pivotValue2)
+                j = j - 1
+            Loop
+        End If
+        
+        If i <= j Then
+            If is1D Then
+                Swap1D arr, i, j
+            Else
+                SwapColumns arr, i, j
+            End If
+            i = i + 1
+            j = j - 1
+        End If
+    Loop While i <= j
+    
+    If leftIndex < j Then QuickSortUnified arr, leftIndex, j, SortLevels
+    If i < rightIndex Then QuickSortUnified arr, i, rightIndex, SortLevels
+End Sub
+
+Private Sub Swap1D(ByRef arr As Variant, ByVal i As Long, ByVal j As Long)
+    Dim tmp As Variant
+    tmp = arr(i)
+    arr(i) = arr(j)
+    arr(j) = tmp
+End Sub
+
+
+Private Sub SwapColumns(ByRef arr As Variant, ByVal col1 As Long, ByVal col2 As Long)
+    Dim temp As Variant
+    Dim i As Long
+    For i = LBound(arr, 1) To UBound(arr, 1)
+        temp = arr(i, col1)
+        arr(i, col1) = arr(i, col2)
+        arr(i, col2) = temp
+    Next i
+End Sub
+
+
+
+Public Function HadamardOperationWithHeaderIndex(arrA As Variant, arrB As Variant, operation As String, headerRows As Integer) As Variant
+
+    Dim rL As Long, rU As Long, cL As Long, cU As Long
+    Dim r As Long, c As Long
+    Dim res() As Variant
+
+    If Not (IsArray(arrA) And IsArray(arrB)) Then Exit Function
+
+    rL = LBound(arrA, 1): rU = UBound(arrA, 1)
+    cL = LBound(arrA, 2): cU = UBound(arrA, 2)
+
+    ReDim res(rL To rU, cL To cU)
+
+    For r = rL To rU
+        For c = cL To cU
+            If r < rL + headerRows Or c = cL Then
+                res(r, c) = arrA(r, c)
+            Else
+                
+                If IsNumeric(arrA(r, c)) And IsNumeric(arrB(r, c)) Then
+                    Select Case operation
+                        Case "*"
+                            res(r, c) = CDbl(arrA(r, c)) * CDbl(arrB(r, c))
+                        Case "-"
+                            res(r, c) = CDbl(arrA(r, c)) - CDbl(arrB(r, c))
+                        Case "+"
+                            res(r, c) = CDbl(arrA(r, c)) + CDbl(arrB(r, c))
+                        Case "/"
+                            res(r, c) = CDbl(arrA(r, c)) / CDbl(arrB(r, c))
+                    End Select
+                Else
+                    res(r, c) = ""
+                End If
+            End If
+        Next c
+    Next r
+
+    HadamardOperationWithHeaderIndex = res
+    
+End Function
+
+Public Function OuterJoinArraysByKey(arrA As Variant, arrB As Variant) As Variant
+
+    Dim dKeys As Object: Set dKeys = CreateObject("Scripting.Dictionary")
+    Dim rA1 As Long, rAU As Long, cA1 As Long, cAU As Long
+    Dim rB1 As Long, rBU As Long, cB1 As Long, cBU As Long
+    Dim key As Variant
+    Dim i As Long, j As Long, k As Long
+
+    rA1 = LBound(arrA, 1): rAU = UBound(arrA, 1)
+    cA1 = LBound(arrA, 2): cAU = UBound(arrA, 2)
+    rB1 = LBound(arrB, 1): rBU = UBound(arrB, 1)
+    cB1 = LBound(arrB, 2): cBU = UBound(arrB, 2)
+
+    ' Collect all unique keys from both arrays (skip header row if needed)
+    For i = rA1 + 1 To rAU
+        key = arrA(i, cA1)
+        If Not dKeys.Exists(key) Then dKeys(key) = Empty
+    Next i
+    For i = rB1 + 1 To rBU
+        key = arrB(i, cB1)
+        If Not dKeys.Exists(key) Then dKeys(key) = Empty
+    Next i
+
+    Dim nKeys As Long: nKeys = dKeys.count
+    Dim nColsA As Long: nColsA = cAU - cA1
+    Dim nColsB As Long: nColsB = cBU - cB1
+
+    Dim outArr() As Variant
+    ReDim outArr(0 To nKeys, 0 To nColsA + nColsB) 'header + data
+
+    outArr(0, 0) = arrA(rA1, cA1)  'header for index
+    For j = 1 To nColsA
+        outArr(0, j) = arrA(rA1, cA1 + j)
+    Next j
+    For j = 1 To nColsB
+        outArr(0, nColsA + j) = arrB(rB1, cB1 + j)
+    Next j
+
+
+    Dim dictA As Object: Set dictA = CreateObject("Scripting.Dictionary")
+    Dim dictB As Object: Set dictB = CreateObject("Scripting.Dictionary")
+    For i = rA1 + 1 To rAU: dictA(arrA(i, cA1)) = i: Next i
+    For i = rB1 + 1 To rBU: dictB(arrB(i, cB1)) = i: Next i
+
+    ' Fill data
+    k = 1
+    For Each key In dKeys.Keys
+        outArr(k, 0) = key
+        ' From arrA
+        If dictA.Exists(key) Then
+            i = dictA(key)
+            For j = 1 To nColsA
+                outArr(k, j) = arrA(i, cA1 + j)
+            Next j
+        End If
+        ' From arrB
+        If dictB.Exists(key) Then
+            i = dictB(key)
+            For j = 1 To nColsB
+                outArr(k, nColsA + j) = arrB(i, cB1 + j)
+            Next j
+        End If
+        k = k + 1
+    Next key
+
+    OuterJoinArraysByKey = outArr
+    
+End Function
+
+
+Function AddColumnOfOneValue(arr As Variant, ByVal theValue As Variant) As Variant
+    Dim rL As Long, rU As Long, cL As Long, cU As Long
+    Dim r As Long, c As Long
+    Dim result() As Variant
+
+    If Not IsArray(arr) Then Exit Function
+
+    rL = LBound(arr, 1): rU = UBound(arr, 1)
+    cL = LBound(arr, 2): cU = UBound(arr, 2)
+
+    ' Redim with an extra column
+    ReDim result(rL To rU, cL To cU + 1)
+
+    For r = rL To rU
+        For c = cL To cU
+            result(r, c) = arr(r, c)
+        Next c
+        result(r, cU + 1) = theValue   ' Add 1 at the end
+    Next r
+
+    AddColumnOfOneValue = result
+End Function
+
+
+
+' Requires a reference to Microsoft Scripting Runtime
+Public Function SumOrConcatByConditions( _
+    arr As Variant, _
+    sumField As String, _
+    Optional ByVal eqConditions As Dictionary, _
+    Optional ByVal neqConditions As Dictionary, _
+    Optional ByVal inConditions As Dictionary, _
+    Optional ByVal notInConditions As Dictionary, _
+    Optional ByVal gtConditions As Dictionary, _
+    Optional ByVal ltConditions As Dictionary, _
+    Optional ByVal containsConditions As Dictionary _
+) As Variant
+
+    Dim rL As Long, rU As Long, cL As Long, cU As Long
+    Dim headerMap     As Dictionary
+    Dim total         As Double
+    Dim r             As Long, c As Long, fld As Variant
+    Dim ok            As Boolean
+    Dim cSum          As Long
+    Dim isNumericCol  As Boolean
+    Dim uniques       As Dictionary
+    Dim cellValue     As Variant
+    
+    ' --- Key arrays (one-time) ---
+    Dim eqKeys       As Variant
+    Dim neqKeys      As Variant
+    Dim inKeys       As Variant
+    Dim notInKeys    As Variant
+    Dim gtKeys       As Variant
+    Dim ltKeys       As Variant
+    Dim containsKeys As Variant
+    
+    If Not IsArray(arr) Then Exit Function
+
+    rL = LBound(arr, 1):  rU = UBound(arr, 1)
+    cL = LBound(arr, 2):  cU = UBound(arr, 2)
+
+    ' Build header ? index map
+    Set headerMap = New Dictionary
+    For c = cL To cU
+        headerMap.Add LCase(CStr(arr(rL, c))), c
+    Next c
+
+    ' Validate sumField
+    If Not headerMap.Exists(LCase(sumField)) Then
+        Err.Raise vbObjectError + 1, , "Sum field '" & sumField & "' not found."
+    End If
+    cSum = headerMap(LCase(sumField))
+
+    ' One-time capture of each dictionary’s keys (if provided)
+    If Not eqConditions Is Nothing Then eqKeys = CloneArray(eqConditions.Keys)
+    If Not neqConditions Is Nothing Then neqKeys = CloneArray(neqConditions.Keys)
+    If Not inConditions Is Nothing Then inKeys = CloneArray(inConditions.Keys)
+    If Not notInConditions Is Nothing Then notInKeys = CloneArray(notInConditions.Keys)
+    If Not gtConditions Is Nothing Then gtKeys = CloneArray(gtConditions.Keys)
+    If Not ltConditions Is Nothing Then ltKeys = CloneArray(ltConditions.Keys)
+    If Not containsConditions Is Nothing Then containsKeys = CloneArray(containsConditions.Keys)
+    
+    ' --- Normalize inConditions to lowercase keys ---
+    If Not inConditions Is Nothing Then
+        Dim v As Variant
+        Dim normIn As Dictionary
+        Set normIn = New Dictionary
+        
+        For Each fld In inKeys
+            If Not IsEmpty(fld) Then
+                Dim srcDict As Dictionary
+                Set srcDict = inConditions(fld)
+                
+                Dim lowerDict As Dictionary
+                Set lowerDict = New Dictionary
+                
+                For Each v In srcDict.Keys
+                    lowerDict.Add LCase(CStr(v)), True
+                Next v
+                
+                normIn.Add fld, lowerDict
+            End If
+        Next fld
+        
+        Set inConditions = normIn
+    End If
+    
+    ' --- Normalize notInConditions to lowercase keys ---
+    If Not notInConditions Is Nothing Then
+        Dim normEx As Dictionary
+        Set normEx = New Dictionary
+        
+        For Each fld In notInKeys
+            If Not IsEmpty(fld) Then
+                Set srcDict = notInConditions(fld)
+                Set lowerDict = New Dictionary
+                
+                For Each v In srcDict.Keys
+                    lowerDict.Add LCase(CStr(v)), True
+                Next v
+                
+                normEx.Add fld, lowerDict
+            End If
+        Next fld
+        
+        Set notInConditions = normEx
+    End If
+    
+    Set fld = Nothing
+    
+    ' Determine if target column is numeric or text
+    cellValue = arr(rL + 1, cSum)
+    isNumericCol = IsNumeric(cellValue)
+    If Not isNumericCol Then Set uniques = New Dictionary
+
+    total = 0
+
+    ' Loop through data rows
+    For r = rL + 1 To rU
+        ok = True
+
+        ' 1) equals
+        If Not IsEmpty(eqKeys) Then
+            For Each fld In eqKeys
+                If LCase(CStr(arr(r, headerMap(LCase(fld))))) <> _
+                   LCase(CStr(eqConditions(fld))) Then
+                    ok = False: Exit For
+                End If
+            Next fld
+        End If
+        If Not ok Then GoTo NextRow
+
+        ' 2) not-equal
+        If Not IsEmpty(neqKeys) Then
+            For Each fld In neqKeys
+                If LCase(CStr(arr(r, headerMap(LCase(fld))))) = _
+                   LCase(CStr(neqConditions(fld))) Then
+                    ok = False: Exit For
+                End If
+            Next fld
+        End If
+        If Not ok Then GoTo NextRow
+
+        ' 3) greater-than
+        If Not IsEmpty(gtKeys) Then
+            For Each fld In gtKeys
+                If CDbl(arr(r, headerMap(LCase(fld)))) <= _
+                   CDbl(gtConditions(fld)) Then
+                    ok = False: Exit For
+                End If
+            Next fld
+        End If
+        If Not ok Then GoTo NextRow
+
+        ' 4) less-than
+        If Not IsEmpty(ltKeys) Then
+            For Each fld In ltKeys
+                If CDbl(arr(r, headerMap(LCase(fld)))) >= _
+                   CDbl(ltConditions(fld)) Then
+                    ok = False: Exit For
+                End If
+            Next fld
+        End If
+        If Not ok Then GoTo NextRow
+
+        ' 5) in-list
+        If Not IsEmpty(inKeys) Then
+            Dim allowed As Dictionary
+            For Each fld In inKeys
+                Set allowed = inConditions(fld)
+                If Not allowed.Exists(LCase(CStr(arr(r, headerMap(LCase(fld)))))) Then
+                    ok = False: Exit For
+                End If
+            Next fld
+        End If
+        If Not ok Then GoTo NextRow
+
+        ' 6) not-in-list
+        If Not IsEmpty(notInKeys) Then
+            Dim excluded As Dictionary
+            For Each fld In notInKeys
+                Set excluded = notInConditions(fld)
+                If excluded.Exists(LCase(CStr(arr(r, headerMap(LCase(fld)))))) Then
+                    ok = False: Exit For
+                End If
+            Next fld
+        End If
+        If Not ok Then GoTo NextRow
+
+        ' 7) contains
+        If Not IsEmpty(containsKeys) Then
+            For Each fld In containsKeys
+                If InStr(1, LCase(CStr(arr(r, headerMap(LCase(fld))))), _
+                         LCase(CStr(containsConditions(fld)))) = 0 Then
+                    ok = False: Exit For
+                End If
+            Next fld
+        End If
+        If Not ok Then GoTo NextRow
+
+        ' 8) accumulate or collect
+        cellValue = arr(r, cSum)
+        If isNumericCol Then
+            total = total + CDbl(cellValue)
+        Else
+            If Not uniques.Exists(CStr(cellValue)) Then
+                uniques.Add CStr(cellValue), True
+            End If
+        End If
+
+NextRow:
+    Next r
+
+    ' Return either sum or distinct-text array
+    If isNumericCol Then
+        SumOrConcatByConditions = total
+    Else
+        If uniques.count > 0 Then
+            Dim outArr() As String, i As Long
+            ReDim outArr(0 To uniques.count - 1)
+            i = 0
+            For Each fld In uniques.Keys
+                outArr(i) = fld: i = i + 1
+            Next fld
+            SumOrConcatByConditions = outArr
+        End If
+    End If
+End Function
+
+
+Private Function CloneArray(arr As Variant) As Variant
+    Dim lo As Long, hi As Long, i As Long
+    lo = LBound(arr): hi = UBound(arr)
+    Dim tmp() As Variant
+    ReDim tmp(lo To hi)
+    For i = lo To hi
+        If Not IsEmpty(arr(i)) Then tmp(i) = arr(i)
+    Next i
+    CloneArray = tmp
+End Function
+
+' -----------------------------------------------------------------------------
+' Sort2DBy1D (In-Place)
+' Arguments:
+'   arr2D:          The 2D array to sort (modified in-place)
+'   keyArr:         1D array containing the desired order of keys
+'   keepUnmatched:  If True, rows not found in keyArr are appended at the bottom
+'   headerRowCount: Number of header rows to preserve at the top
+' -----------------------------------------------------------------------------
+Sub Sort2DBy1D(ByRef arr2D As Variant, keyArr As Variant, keepUnmatched As Boolean, headerRowCount As Long)
+    
+    Dim dictRows As Object: Set dictRows = CreateObject("Scripting.Dictionary")
+    Dim dictKeys As Object: Set dictKeys = CreateObject("Scripting.Dictionary")
+    
+    Dim rowLB As Long, rowUB As Long, colLB As Long, colUB As Long
+    Dim dataStartRow As Long
+    Dim i As Long, j As Long, outRow As Long
+    Dim key As Variant, rowArr As Variant
+
+    ' -- 1) Get bounds of the input array
+    rowLB = LBound(arr2D, 1)
+    rowUB = UBound(arr2D, 1)
+    colLB = LBound(arr2D, 2)
+    colUB = UBound(arr2D, 2)
+
+    ' -- 2) Determine where the data (non-header) begins
+    dataStartRow = rowLB + headerRowCount
+    
+    ' -- 3) Build a dictionary for fast lookups of the SORT KEYS
+    '       This is much faster than looping through keyArr every time
+    For i = LBound(keyArr) To UBound(keyArr)
+        dictKeys(keyArr(i)) = 1
+    Next i
+
+    ' -- 4) Build a dictionary mapping: RowKey -> Row Data (1D Array)
+    '       (Assumes the key is in the first column of the data: colLB)
+    For i = dataStartRow To rowUB
+        key = arr2D(i, colLB)
+        
+        ' Only store if unique (or handle duplicates as needed)
+        If Not dictRows.Exists(key) Then
+            ReDim rowArr(colLB To colUB)
+            For j = colLB To colUB
+                rowArr(j) = arr2D(i, j)
+            Next j
+            dictRows.Add key, rowArr
+        End If
+    Next i
+
+    ' -- 5) Calculate Result Size
+    Dim resultRowCount As Long
+    Dim matchCount As Long
+    
+    ' Count how many keys from keyArr actually exist in the data
+    For i = LBound(keyArr) To UBound(keyArr)
+        If dictRows.Exists(keyArr(i)) Then matchCount = matchCount + 1
+    Next i
+    
+    If keepUnmatched Then
+        ' If keeping unmatched, the size is the same as the original (assuming unique keys)
+        ' Or specifically: Headers + Matched + Unmatched
+        resultRowCount = (rowUB - rowLB + 1)
+    Else
+        ' Only Headers + Matched Keys
+        resultRowCount = headerRowCount + matchCount
+    End If
+    
+    ' -- 6) Create the temporary result array
+    Dim resLB As Long: resLB = rowLB
+    Dim resUB As Long: resUB = resLB + resultRowCount - 1
+    Dim result() As Variant
+    
+    ' Handle edge case where result might be empty if no matches and no headers
+    If resultRowCount > 0 Then
+        ReDim result(resLB To resUB, colLB To colUB)
+    Else
+        ' If array becomes empty, we might need to handle it or leave arr2D as is?
+        ' Here we create an empty array structure
+        ReDim result(resLB To resLB, colLB To colUB)
+    End If
+
+    ' -- 7) Copy Header Rows
+    For i = 0 To headerRowCount - 1
+        For j = colLB To colUB
+            result(rowLB + i, j) = arr2D(rowLB + i, j)
+        Next j
+    Next i
+
+    ' -- 8) Insert Matched Rows (in order of keyArr)
+    outRow = rowLB + headerRowCount
+    For i = LBound(keyArr) To UBound(keyArr)
+        key = keyArr(i)
+        If dictRows.Exists(key) Then
+            rowArr = dictRows(key)
+            For j = colLB To colUB
+                result(outRow, j) = rowArr(j)
+            Next j
+            outRow = outRow + 1
+            
+            ' Optimization: Remove from dictRows so we don't process it again in Unmatched step
+            ' (Optional, but cleaner if we are consuming the data)
+            ' However, if keyArr has duplicates, we might want to keep it.
+            ' Assuming unique keys for standard sort:
+            ' dictRows.Remove key
+        End If
+    Next i
+
+    ' -- 9) Append Unmatched Rows (if requested)
+    If keepUnmatched Then
+        For i = dataStartRow To rowUB
+            key = arr2D(i, colLB)
+            
+            ' Check if this key was NOT in the sort order array
+            If Not dictKeys.Exists(key) Then
+                For j = colLB To colUB
+                    result(outRow, j) = arr2D(i, j)
+                Next j
+                outRow = outRow + 1
+            End If
+        Next i
+    End If
+
+    ' -- 10) Apply changes IN-PLACE
+    arr2D = result
+
+End Sub
+
+''' Helper to test membership in a 1–D array '''
+Private Function IsInArray(val As Variant, arr As Variant) As Boolean
+    Dim i As Long
+    For i = LBound(arr) To UBound(arr)
+        If arr(i) = val Then
+            IsInArray = True
+            Exit Function
+        End If
+    Next i
+    IsInArray = False
+End Function
+
+
+
+Public Function AddEmptyRow(arr As Variant) As Variant
+    Dim r As Long, c As Long
+    r = UBound(arr, 1)
+    c = UBound(arr, 2)
+
+    Dim newArr() As Variant
+    ReDim newArr(1 To r + 1, 1 To c)
+
+    Dim i As Long, j As Long
+    For i = 1 To r
+        For j = 1 To c
+            newArr(i, j) = arr(i, j)
+        Next j
+    Next i
+    ' The new row (row r+1) is left as Empty
+    AddEmptyRow = newArr
+End Function
+
+
+Sub AddByHeadersAndRowIndex( _
+    ByRef arr1 As Variant, _
+    ByRef arr2 As Variant, _
+    ByVal useTwoHeaderRows As Boolean, _
+    Optional ByVal appendMissingRows As Boolean = False)
+
+    Dim mapCol As Object: Set mapCol = CreateObject("Scripting.Dictionary") ' header key -> col in arr1
+    Dim mapRow As Object: Set mapRow = CreateObject("Scripting.Dictionary") ' index -> row in arr1
+
+    Dim rL1 As Long, rU1 As Long, cL1 As Long, cU1 As Long
+    Dim rL2 As Long, rU2 As Long, cL2 As Long, cU2 As Long
+    Dim dataRowStart As Long
+    Dim c As Long, r As Long, tgtCol As Long, c2 As Long
+    Dim keyCol As String, keyRow As String
+    Dim h1_1, h1_2, h2_1, h2_2
+
+    ' Bounds
+    rL1 = LBound(arr1, 1): rU1 = UBound(arr1, 1)
+    cL1 = LBound(arr1, 2): cU1 = UBound(arr1, 2)
+    rL2 = LBound(arr2, 1): rU2 = UBound(arr2, 1)
+    cL2 = LBound(arr2, 2): cU2 = UBound(arr2, 2)
+
+    indexColArr1 = LBound(arr1, 2)
+    indexColArr2 = LBound(arr2, 2)
+
+    ' --- Determine header depth
+    If useTwoHeaderRows Then
+        dataRowStart = rL1 + 2
+    Else
+        dataRowStart = rL1 + 1
+    End If
+
+    ' -----------------------------
+    ' BUILD COLUMN MAP in arr1
+    ' -----------------------------
+    For c = indexColArr1 + 1 To cU1
+
+        If useTwoHeaderRows Then
+            h1_1 = arr1(rL1, c)
+            h1_2 = arr1(rL1 + 1, c)
+            keyCol = MakeKey(h1_1, h1_2)
+        Else
+            h1_1 = arr1(rL1, c)
+            keyCol = MakeKey(h1_1)
+        End If
+
+        If Len(keyCol) > 0 Then
+            If Not mapCol.Exists(keyCol) Then mapCol.Add keyCol, c
+        End If
+    Next c
+
+    ' -----------------------------
+    ' BUILD ROW MAP in arr1
+    ' -----------------------------
+    For r = dataRowStart To rU1
+        keyRow = NormalizeIndex(arr1(r, indexColArr1))
+        If Len(keyRow) > 0 Then
+            If Not mapRow.Exists(keyRow) Then mapRow.Add keyRow, r
+        End If
+    Next r
+
+    ' -----------------------------
+    ' PROCESS arr2 COLUMNS
+    ' -----------------------------
+    For c2 = indexColArr2 + 1 To cU2
+
+        If useTwoHeaderRows Then
+            h2_1 = arr2(rL2, c2)
+            h2_2 = arr2(rL2 + 1, c2)
+            keyCol = MakeKey(h2_1, h2_2)
+        Else
+            h2_1 = arr2(rL2, c2)
+            keyCol = MakeKey(h2_1)
+        End If
+
+        ' Find or append target column in arr1
+        If mapCol.Exists(keyCol) Then
+            tgtCol = mapCol(keyCol)
+        Else
+            If useTwoHeaderRows Then
+                tgtCol = AppendColumn(arr1, h2_1, h2_2, rL1, rU1, cL1, cU1)
+            Else
+                tgtCol = AppendColumn(arr1, h2_1, "", rL1, rU1, cL1, cU1)
+            End If
+
+            mapCol.Add keyCol, tgtCol
+            cU1 = UBound(arr1, 2)
+        End If
+
+        ' -----------------------------
+        ' PROCESS arr2 ROWS
+        ' -----------------------------
+        For r = dataRowStart To rU2
+
+            keyRow = NormalizeIndex(arr2(r, indexColArr2))
+            If Len(keyRow) = 0 Then GoTo NextRow
+
+            If mapRow.Exists(keyRow) Then
+                ' Add
+                arr1(mapRow(keyRow), tgtCol) = _
+                    ValOr0(arr1(mapRow(keyRow), tgtCol)) + ValOr0(arr2(r, c2))
+
+            ElseIf appendMissingRows Then
+                ' Append missing row
+                Dim newRow As Long
+                newRow = AppendRowWithIndex(arr1, rL1, rU1, cL1, cU1, indexColArr1, arr2(r, indexColArr2))
+                rU1 = UBound(arr1, 1)
+                mapRow.Add keyRow, newRow
+
+                arr1(newRow, tgtCol) = _
+                    ValOr0(arr1(newRow, tgtCol)) + ValOr0(arr2(r, c2))
+
+            Else
+                Debug.Print "No matching row index for: "; keyRow
+            End If
+
+NextRow:
+        Next r
+    Next c2
+
+End Sub
+
+'--- Helpers ---
+
+Function MakeKey(ParamArray h() As Variant) As String
+    Dim i As Long, tmp As String
+    For i = LBound(h) To UBound(h)
+        tmp = tmp & "|" & Trim(CStr(h(i)))
+    Next
+    MakeKey = Mid$(tmp, 2) ' remove first |
+End Function
+
+' Normalize an index to a stable string key
+Private Function NormalizeIndex(v As Variant) As String
+    NormalizeIndex = LCase$(Trim$(CStr(v)))
+End Function
+
+' Numeric-safe coercion
+Private Function ValOr0(v As Variant) As Double
+    If IsError(v) Then
+        ValOr0 = 0
+    ElseIf IsNumeric(v) Then
+        ValOr0 = CDbl(v)
+    Else
+        ValOr0 = 0
+    End If
+End Function
+
+' Append a new column at the end of arr; set the two header cells; return its column index
+Private Function AppendColumn(ByRef arr As Variant, _
+                              ByVal h1 As Variant, ByVal h2 As Variant, _
+                              ByVal rL As Long, ByVal rU As Long, _
+                              ByVal cL As Long, ByVal cU As Long) As Long
+    Dim newCU As Long
+    newCU = cU + 1
+    ReDim Preserve arr(rL To rU, cL To newCU)
+    arr(rL, newCU) = h1
+    arr(rL + 1, newCU) = h2
+    AppendColumn = newCU
+End Function
+
+' Append a new **row** at the bottom of arr and write the index into indexCol.
+' NOTE: You cannot ReDim Preserve to grow the FIRST dimension, so we rebuild a larger array.
+Private Function AppendRowWithIndex(ByRef arr As Variant, _
+                                    ByVal rL As Long, ByVal rU As Long, _
+                                    ByVal cL As Long, ByVal cU As Long, _
+                                    ByVal indexCol As Long, ByVal indexValue As Variant) As Long
+    Dim newRU As Long: newRU = rU + 1
+    Dim tmp As Variant
+    Dim r As Long, c As Long
+
+    ' Build a bigger array and copy everything over
+    ReDim tmp(rL To newRU, cL To cU)
+    For r = rL To rU
+        For c = cL To cU
+            tmp(r, c) = arr(r, c)
+        Next c
+    Next r
+
+    ' Set the new row (empty by default)
+    ' Write the index into the right column
+    tmp(newRU, indexCol) = indexValue
+
+    ' Swap back
+    arr = tmp
+
+    AppendRowWithIndex = newRU
+End Function
+
+Public Function MergeColumnsByHeaderKeys(arr As Variant, _
+                                         keepKey As Variant, _
+                                         addKey As Variant) As Variant
+    Dim rL As Long, rU As Long, cL As Long, cU As Long
+    Dim keepCol As Long, addCol As Long
+    Dim result() As Variant
+    Dim r As Long, c As Long, outC As Long
+    
+    If Not IsArray(arr) Then Exit Function
+    If Not IsArray(keepKey) Or Not IsArray(addKey) Then Exit Function
+    
+    rL = LBound(arr, 1): rU = UBound(arr, 1)
+    cL = LBound(arr, 2): cU = UBound(arr, 2)
+    
+    ' Find the two columns by header arrays
+    keepCol = FindColByHeaderKey(arr, keepKey, rL, cL, cU)
+    addCol = FindColByHeaderKey(arr, addKey, rL, cL, cU)
+    If keepCol = 0 Or addCol = 0 Then Exit Function
+    
+    ' Build output with one fewer column
+    ReDim result(rL To rU, cL To cU - 1)
+    
+    For r = rL To rU
+        outC = cL
+        For c = cL To cU
+            If c = keepCol Then
+                ' If this row is part of the header depth: override with keepKey value
+                If r - rL <= UBound(keepKey) - LBound(keepKey) Then
+                    result(r, outC) = keepKey(LBound(keepKey) + (r - rL))
+                Else
+                    ' Data rows: sum keep + add
+                    result(r, outC) = ToDouble(arr(r, keepCol)) + ToDouble(arr(r, addCol))
+                End If
+                outC = outC + 1
+            ElseIf c <> addCol Then
+                ' Copy other columns unchanged
+                result(r, outC) = arr(r, c)
+                outC = outC + 1
+            End If
+        Next c
+    Next r
+    
+    MergeColumnsByHeaderKeys = result
+End Function
+
+'--- Find a column whose header matches a multi-row key (any depth)
+Private Function FindColByHeaderKey(arr As Variant, key As Variant, _
+                                    rTop As Long, cL As Long, cU As Long) As Long
+    Dim c As Long, depth As Long, i As Long
+    Dim match As Boolean
+    
+    depth = UBound(key) - LBound(key) + 1
+    
+    For c = cL To cU
+        match = True
+        For i = 0 To depth - 1
+            If LCase$(Trim$(CStr(arr(rTop + i, c)))) <> LCase$(Trim$(CStr(key(LBound(key) + i)))) Then
+                match = False
+                Exit For
+            End If
+        Next i
+        If match Then
+            FindColByHeaderKey = c
+            Exit Function
+        End If
+    Next c
+    '0 if not found
+End Function
+
+'--- Numeric conversion
+Private Function ToDouble(v As Variant) As Double
+    If IsNumeric(v) Then
+        ToDouble = CDbl(v)
+    ElseIf Len(v & vbNullString) > 0 Then
+        ToDouble = val(CStr(v))
+    Else
+        ToDouble = 0#
+    End If
+End Function
+
+
+Sub DeleteLastRow(ByRef arr As Variant)
+
+    Dim lastRow As Long, lastCol As Long
+    Dim newArr As Variant
+    Dim r As Long, c As Long
+    
+    lastRow = UBound(arr, 1)
+    lastCol = UBound(arr, 2)
+    
+    ' If only one row, return empty array
+    If lastRow = LBound(arr, 1) Then
+        Erase arr
+        Exit Sub
+    End If
+    
+    ' Create new array with one fewer row
+    ReDim newArr(LBound(arr, 1) To lastRow - 1, LBound(arr, 2) To lastCol)
+    
+    ' Copy all but last row
+    For r = LBound(arr, 1) To lastRow - 1
+        For c = LBound(arr, 2) To lastCol
+            newArr(r, c) = arr(r, c)
+        Next c
+    Next r
+    
+    ' Replace
+    arr = newArr
+
+End Sub
+
+
+
+' -----------------------------------------------------------------------------
+' AlignArrays In-Place
+' Arguments:
+'   arr1, arr2:  The arrays to modify (ByRef)
+'   idxCols:     How many COLUMNS on the left are identifiers (e.g. ID, Name = 2)
+'   headRows:    How many ROWS at the top are headers (e.g. Label, Unit = 2)
+' -----------------------------------------------------------------------------
+Sub AlignArrays(ByRef arr1 As Variant, ByRef arr2 As Variant, idxCols As Long, headRows As Long)
+    ' Use TextCompare to ignore case ("ID" = "id")
+    Dim dictRows As Object: Set dictRows = CreateObject("Scripting.Dictionary")
+    Dim dictCols As Object: Set dictCols = CreateObject("Scripting.Dictionary")
+    dictRows.CompareMode = 1 ' vbTextCompare
+    dictCols.CompareMode = 1 ' vbTextCompare
+    
+    ' =========================================================================
+    ' STEP 1: SCAN UNIQUE KEYS
+    ' =========================================================================
+    ' Note: We Trim() keys to avoid "Header " <> "Header" duplicates
+    
+    ' Scan Rows (Indices)
+    ScanKeys dictRows, arr1, idxCols, headRows, True
+    ScanKeys dictRows, arr2, idxCols, headRows, True
+    
+    ' Scan Columns (Headers)
+    ScanKeys dictCols, arr1, idxCols, headRows, False
+    ScanKeys dictCols, arr2, idxCols, headRows, False
+    
+    ' =========================================================================
+    ' STEP 2: PREPARE NEW ARRAYS
+    ' =========================================================================
+    Dim out1 As Variant, out2 As Variant
+    Dim totalRows As Long, totalCols As Long
+    
+    totalRows = dictRows.count + headRows
+    totalCols = dictCols.count + idxCols
+    
+    If totalRows < 1 Then totalRows = 1
+    If totalCols < 1 Then totalCols = 1
+    
+    ' Output is always 1-based to standardize results
+    ReDim out1(1 To totalRows, 1 To totalCols)
+    ReDim out2(1 To totalRows, 1 To totalCols)
+    
+    ' =========================================================================
+    ' STEP 3: FILL HEADERS & INDICES (SKELETON)
+    ' =========================================================================
+    Dim key As Variant, parts As Variant, k As Long
+    Dim tRow As Long, tCol As Long
+    
+    ' Fill Row Indices (Vertical)
+    For Each key In dictRows.Keys
+        parts = Split(key, "|")
+        tRow = dictRows(key) + headRows
+        For k = 0 To UBound(parts)
+            If k < idxCols Then
+                out1(tRow, k + 1) = parts(k)
+                out2(tRow, k + 1) = parts(k)
+            End If
+        Next k
+    Next key
+    
+    ' Fill Column Headers (Horizontal)
+    For Each key In dictCols.Keys
+        parts = Split(key, "|")
+        tCol = dictCols(key) + idxCols
+        For k = 0 To UBound(parts)
+            If k < headRows Then
+                out1(k + 1, tCol) = parts(k)
+                out2(k + 1, tCol) = parts(k)
+            End If
+        Next k
+    Next key
+
+    ' Copy the Top-Left Corner (Intersection of Headers and Indices)
+    ' We take this from arr1 (assuming arr1 has the correct corner labels)
+    CopyCorner out1, arr1, idxCols, headRows
+    CopyCorner out2, arr1, idxCols, headRows
+    
+    ' =========================================================================
+    ' STEP 4: FILL DATA
+    ' =========================================================================
+    FillData out1, arr1, dictRows, dictCols, idxCols, headRows
+    FillData out2, arr2, dictRows, dictCols, idxCols, headRows
+    
+    ' =========================================================================
+    ' STEP 5: UPDATE ORIGINAL VARIABLES
+    ' =========================================================================
+    arr1 = out1
+    arr2 = out2
+End Sub
+
+' -----------------------------------------------------------------------------
+' Helper: Scans keys with Trim and specific bounds
+' -----------------------------------------------------------------------------
+Private Sub ScanKeys(dict As Object, arr As Variant, idxCols As Long, headRows As Long, isRowScan As Boolean)
+    Dim i As Long, lb1 As Long, lb2 As Long
+    Dim key As String
+    
+    lb1 = LBound(arr, 1)
+    lb2 = LBound(arr, 2)
+    
+    If isRowScan Then
+        For i = (lb1 + headRows) To UBound(arr, 1)
+            key = GetKey(arr, i, idxCols, lb2, True)
+            If key <> "" And Not dict.Exists(key) Then dict(key) = dict.count + 1
+        Next i
+    Else
+        For i = (lb2 + idxCols) To UBound(arr, 2)
+            key = GetKey(arr, i, headRows, lb1, False)
+            If key <> "" And Not dict.Exists(key) Then dict(key) = dict.count + 1
+        Next i
+    End If
+End Sub
+
+' -----------------------------------------------------------------------------
+' Helper: Generates Trimmed Key
+' -----------------------------------------------------------------------------
+Private Function GetKey(arr As Variant, mainIdx As Long, depth As Long, dimStart As Long, isRowKey As Boolean) As String
+    If depth = 0 Then GetKey = "": Exit Function
+    
+    Dim k As Long, s As String, val As String
+    For k = 0 To depth - 1
+        If isRowKey Then
+            val = Trim(CStr(arr(mainIdx, dimStart + k)))
+        Else
+            val = Trim(CStr(arr(dimStart + k, mainIdx)))
+        End If
+        s = s & val & "|"
+    Next k
+    
+    If Len(s) > 0 Then GetKey = Left(s, Len(s) - 1) Else GetKey = ""
+End Function
+
+' -----------------------------------------------------------------------------
+' Helper: Fills Data by Dictionary Lookup
+' -----------------------------------------------------------------------------
+Private Sub FillData(outArr As Variant, srcArr As Variant, dRows As Object, dCols As Object, idxCols As Long, headRows As Long)
+    Dim r As Long, c As Long
+    Dim rKey As String, cKey As String
+    Dim tRow As Long, tCol As Long
+    
+    Dim lb1 As Long: lb1 = LBound(srcArr, 1)
+    Dim lb2 As Long: lb2 = LBound(srcArr, 2)
+    
+    For r = (lb1 + headRows) To UBound(srcArr, 1)
+        rKey = GetKey(srcArr, r, idxCols, lb2, True)
+        
+        If dRows.Exists(rKey) Then
+            tRow = dRows(rKey) + headRows
+            For c = (lb2 + idxCols) To UBound(srcArr, 2)
+                cKey = GetKey(srcArr, c, headRows, lb1, False)
+                If dCols.Exists(cKey) Then
+                    tCol = dCols(cKey) + idxCols
+                    outArr(tRow, tCol) = srcArr(r, c)
+                End If
+            Next c
+        End If
+    Next r
+End Sub
+
+' -----------------------------------------------------------------------------
+' Helper: Preserves the top-left corner labels (e.g. "ID", "Date")
+' -----------------------------------------------------------------------------
+Private Sub CopyCorner(outArr As Variant, srcArr As Variant, idxCols As Long, headRows As Long)
+    Dim r As Long, c As Long
+    Dim lb1 As Long: lb1 = LBound(srcArr, 1)
+    Dim lb2 As Long: lb2 = LBound(srcArr, 2)
+    
+    If idxCols = 0 Or headRows = 0 Then Exit Sub
+    
+    ' Copy the intersection of headers and indices safely
+    For r = 1 To headRows
+        For c = 1 To idxCols
+            ' Only copy if source actually has this cell
+            If (lb1 + r - 1) <= UBound(srcArr, 1) And (lb2 + c - 1) <= UBound(srcArr, 2) Then
+                outArr(r, c) = srcArr(lb1 + r - 1, lb2 + c - 1)
+            End If
+        Next c
+    Next r
+End Sub
+
+
+Function ArrayToHTML(dataArray As Variant, Optional colsToKeep As Variant) As String
+    Dim html As String
+    Dim i As Long, j As Long, k As Long
+    Dim showColumn As Boolean
+    
+    html = "<table border='1' style='border-collapse:collapse; width:100%; font-family:Arial;'>"
+    
+    For i = LBound(dataArray, 1) To UBound(dataArray, 1)
+        html = html & "<tr>"
+        
+        ' Si colsToKeep est absent, on boucle sur toutes les colonnes
+        If IsMissing(colsToKeep) Then
+            For j = LBound(dataArray, 2) To UBound(dataArray, 2)
+                html = html & "<td style='padding:5px;'>" & dataArray(i, j) & "</td>"
+            Next j
+        Else
+            ' Sinon, on ne boucle que sur les indices spécifiés dans l'array colsToKeep
+            For k = LBound(colsToKeep) To UBound(colsToKeep)
+                j = colsToKeep(k)
+                html = html & "<td style='padding:5px;'>" & dataArray(i, j) & "</td>"
+            Next k
+        End If
+        
+        html = html & "</tr>"
+    Next i
+    
+    html = html & "</table>"
+    ArrayToHTML = html
+End Function
+

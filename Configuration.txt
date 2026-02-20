@@ -1,0 +1,81 @@
+Option Explicit
+
+Public rootDirInfinInventories As String
+Public rootDirReferential As String
+Public FundsThroughXml As New Dictionary
+Public validInstrumentsAssetClassesForBDLReferential As New Dictionary
+
+
+Private Sub Class_Initialize()
+
+    rootDirInfinInventories = "V:\Production\fund\inventory"
+    rootDirReferential = "V:\Production\referentiel\INFIN"
+    
+    FundsThroughXml.Add "03653646.1001", True
+    FundsThroughXml.Add "04432503.1001", True
+    FundsThroughXml.Add "04424420.1001", True
+    FundsThroughXml.Add "04467668.1001", True
+    FundsThroughXml.Add "04438803.1001", True
+    FundsThroughXml.Add "04438790.1001", True
+    FundsThroughXml.Add "04459436.1001", True
+    FundsThroughXml.Add "04459371.1001", True
+    FundsThroughXml.Add "04465711.1001", True
+    FundsThroughXml.Add "04476501.1001", True
+    FundsThroughXml.Add "04483108.1001", True
+    FundsThroughXml.Add "04485925.1001", True
+    FundsThroughXml.Add "04486883.1001", True
+    
+    With validInstrumentsAssetClassesForBDLReferential
+        .Add "bond", True
+        .Add "equity", True
+        .Add "fund", True
+        .Add "tracker", True
+        .Add "cash", True
+        .Add "convertible", True
+        .Add "future", True
+    End With
+    
+End Sub
+
+
+Public Function CreateInventoryCsvPath(ByVal dt As Date, ByVal mandateId As String) As String
+    
+    Dim fileName As String, fullPath As String
+    
+    dt = Application.WorksheetFunction.WorkDay(dt, -1)
+    
+    fileName = "Inventaire_" & mandateId & "_" & CStr(Format(dt, "YYYYMMDD")) & ".csv"
+    fullPath = rootDirInfinInventories & "\" & CStr(Year(dt)) & "\" & makeItTwoDigits(Month(dt)) & "\" & makeItTwoDigits(Day(dt)) & "\" & fileName
+    
+    CreateInventoryCsvPath = fullPath
+    
+End Function
+
+
+Public Function makeItTwoDigits(ByVal inte As Integer) As String
+
+    If inte < 10 Then
+        makeItTwoDigits = "0" & CStr(inte)
+    Else
+        makeItTwoDigits = CStr(inte)
+    End If
+
+End Function
+
+    
+
+
+Public Function CreateInstrumentsReferentialPath(ByVal dt As Date) As String
+    
+    Dim fileName As String, fullPath As String
+
+    fileName = "INFIN_referential_securities_" & CStr(Format(dt, "YYYYMMDD")) & ".xlsx"
+    fullPath = rootDirReferential & "\" & CStr(Year(dt)) & "\" & makeItTwoDigits(Month(dt)) & "\" & fileName
+    
+    CreateInstrumentsReferentialPath = fullPath
+    
+End Function
+
+
+
+

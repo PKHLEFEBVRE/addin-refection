@@ -1,0 +1,94 @@
+Option Explicit
+
+Public instrumentId As String
+Public symbol As String
+Public name As String
+Public isin As String
+Public ticker As String
+
+Public ccy As String
+Public geography As String
+Public country As String
+Public assetClass As String
+Public category As String
+Public subCategory As String
+Public exchange As String
+
+Public equityDelta As Double
+Public guaranteedCapital As Double
+Public quoteInPct As Boolean
+
+Public lastClose As Double
+Public lastCloseDate As Date
+
+Public minRating As String
+Public agenciesRatings As Dictionary
+
+Public issuer As String
+Public issuerCountry As String
+Public issuerLtRatingSP As String
+
+Public manCo As String
+Public isFIA As Boolean
+
+
+
+
+Private Sub Class_Initialize()
+    
+    Set agenciesRatings = New Dictionary
+    
+End Sub
+
+
+Public Sub ComputeMinRating()
+
+    If agenciesRatings.count = 0 Then Exit Sub
+
+    Dim ratingScale As Dictionary
+    Set ratingScale = New Dictionary
+    
+    ' Define the rating scale: higher number = worse rating
+    ratingScale.Add "AAA", 1
+    ratingScale.Add "AA+", 2
+    ratingScale.Add "AA", 3
+    ratingScale.Add "AA-", 4
+    ratingScale.Add "A+", 5
+    ratingScale.Add "A", 6
+    ratingScale.Add "A-", 7
+    ratingScale.Add "BBB+", 8
+    ratingScale.Add "BBB", 9
+    ratingScale.Add "BBB-", 10
+    ratingScale.Add "BB+", 11
+    ratingScale.Add "BB", 12
+    ratingScale.Add "BB-", 13
+    ratingScale.Add "B+", 14
+    ratingScale.Add "B", 15
+    ratingScale.Add "B-", 16
+    ratingScale.Add "CCC", 17
+    ratingScale.Add "CC", 18
+    ratingScale.Add "C", 19
+    ratingScale.Add "D", 20
+
+    Dim worstScore As Long: worstScore = 0
+    Dim worstRating As String: worstRating = "N/A"
+    
+    Dim agency As Variant
+    For Each agency In agenciesRatings.Keys
+        Dim r As String
+        r = UCase(Trim(agenciesRatings(agency)))
+        
+        If ratingScale.Exists(r) Then
+            If ratingScale(r) > worstScore Then
+                worstScore = ratingScale(r)
+                worstRating = r
+            End If
+        End If
+    Next agency
+
+    minRating = worstRating
+
+End Sub
+
+
+

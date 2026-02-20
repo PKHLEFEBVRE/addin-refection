@@ -1,0 +1,25 @@
+Option Explicit
+
+Public Name As String
+Public comment As String
+Public InfinId As String
+Public insuranceContract As String
+Public accountName As String
+Public client As String
+Public creationDate As Date
+Public insurer As String
+Public custodian As String
+Public sales As String
+Public accountType As String
+Public AVType As String
+Public ccy As String
+Public profile As String
+Public composition As String
+Public targetProfile As String
+Public targetComposition As String
+Public lastComputed As String
+Public CashAndTreso As Double
+Public AUM As Double
+Public exposureLimits As Dictionary
+
+

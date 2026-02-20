@@ -1,0 +1,200 @@
+Option Base 1
+
+Public Function GetLinesFromExcelFile(ByRef path As String, Optional ByVal Worksheet As String, Optional ByVal asLines As Boolean = False) As Variant
+    
+    Dim emptyArray As Variant
+    emptyArray = Array()
+    
+    If path = "" Then
+    
+        Debug.Print "No file path given"
+        GetLinesFromExcelFile = emptyArray
+        Exit Function
+        
+    End If
+    
+    Dim fso As FileSystemObject
+    Set fso = New FileSystemObject
+        
+    If Not fso.FileExists(path) Then
+        
+        Debug.Print "No file at dir: " & path
+        GetLinesFromExcelFile = emptyArray
+        Exit Function
+        
+    End If
+    
+    Dim lines() As Variant
+    If asLines Then
+        lines = ExtractLinesFromOpenExcelFile(path, Worksheet)
+    Else
+        lines = ExtractDataFromOpenExcelFile(path, Worksheet)
+    End If
+    
+    If isArrayEmpty(lines) Then
+        Debug.Print "Empty csv file"
+        Exit Function
+    End If
+    
+    GetLinesFromExcelFile = lines
+
+End Function
+
+
+Function ExtractDataFromOpenExcelFile(filePath As String, Optional ByVal Worksheet As String) As Variant
+
+
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim data As Variant
+    Dim result() As Variant
+    Dim i As Long, j As Long
+    Dim rowCount As Long, colCount As Long
+    Dim lineArray() As Variant
+    
+    Dim oldScreenUpdating As Boolean
+    Dim oldCalculation As XlCalculation
+    Dim oldEnableEvents As Boolean
+    
+    oldScreenUpdating = Application.ScreenUpdating
+    oldCalculation = Application.Calculation
+    oldEnableEvents = Application.EnableEvents
+    
+    
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
+
+    Set wb = Workbooks.Open(filePath, ReadOnly:=True)
+    
+    If Worksheet = "" Then
+        Set ws = wb.Sheets(1)
+    Else
+        Set ws = wb.Sheets(Worksheet)
+    End If
+    
+    data = ws.UsedRange.Value
+    rowCount = UBound(data, 1)
+    colCount = UBound(data, 2)
+    
+    ReDim result(1 To rowCount, 1 To colCount)
+    
+
+    For i = 1 To rowCount
+        For j = 1 To colCount
+            result(i, j) = data(i, j)
+        Next j
+    Next i
+    
+
+    wb.Close SaveChanges:=False
+
+    Application.ScreenUpdating = oldScreenUpdating
+    Application.Calculation = oldCalculation
+    Application.EnableEvents = oldEnableEvents
+    
+    ExtractDataFromOpenExcelFile = result
+    
+End Function
+
+
+Public Sub WriteDataToExcelFile(filePath As String, data As Variant)
+    Dim xlApp As Object
+    Dim wb As Object
+    Dim ws As Object
+    Dim i As Long, colCount As Integer
+
+    On Error GoTo CleanUp
+    
+    Set xlApp = CreateObject("Excel.Application")
+    xlApp.DisplayAlerts = False
+
+    If Dir(filePath) <> "" Then
+        Set wb = xlApp.Workbooks.Open(filePath)
+    Else
+        Set wb = xlApp.Workbooks.Add
+    End If
+    
+    Set ws = wb.Sheets(1)
+    ws.Cells.ClearContents
+
+    rowCount = UBound(data, 1)
+    colCount = UBound(data, 2)
+        
+    For i = 1 To rowCount
+        For j = 1 To colCount
+            ws.Cells(i, j) = data(i, j)
+        Next j
+    Next i
+
+    wb.Save
+    
+CleanUp:
+    If Not wb Is Nothing Then wb.Close SaveChanges:=True
+    If Not xlApp Is Nothing Then xlApp.Quit
+    
+    Set ws = Nothing
+    Set wb = Nothing
+    Set xlApp = Nothing
+End Sub
+
+
+Function ExtractLinesFromOpenExcelFile(filePath As String, Optional ByVal Worksheet As String) As Variant
+
+
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim data As Variant
+    Dim result() As Variant
+    Dim i As Long, j As Long
+    Dim rowCount As Long, colCount As Long
+    Dim lineArray() As Variant
+    
+    Dim oldScreenUpdating As Boolean
+    Dim oldCalculation As XlCalculation
+    Dim oldEnableEvents As Boolean
+    
+    oldScreenUpdating = Application.ScreenUpdating
+    oldCalculation = Application.Calculation
+    oldEnableEvents = Application.EnableEvents
+    
+    
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
+
+    Set wb = Workbooks.Open(filePath, ReadOnly:=True)
+    
+    If Worksheet = "" Then
+        Set ws = wb.Sheets(1)
+    Else
+        Set ws = wb.Sheets(Worksheet)
+    End If
+    
+    data = ws.UsedRange.Value
+    rowCount = UBound(data, 1)
+    colCount = UBound(data, 2)
+    
+    ReDim result(1 To rowCount)
+    
+
+    For i = 1 To rowCount
+
+        ReDim lineArray(1 To colCount)
+        For j = 1 To colCount
+            lineArray(j) = data(i, j)
+        Next j
+
+        result(i) = lineArray
+    Next i
+    
+
+    wb.Close SaveChanges:=False
+
+    Application.ScreenUpdating = oldScreenUpdating
+    Application.Calculation = oldCalculation
+    Application.EnableEvents = oldEnableEvents
+    
+    ExtractLinesFromOpenExcelFile = result
+    
+End Function

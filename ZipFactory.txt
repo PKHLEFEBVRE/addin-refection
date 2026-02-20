@@ -1,0 +1,87 @@
+
+
+Public Function GetUnknownBDLFileNameFromType(ByVal dt As Date, ByVal fileType As String) As String
+    
+    Dim config As Configuration
+    Set config = data.GetConfiguration
+    
+    Dim fileName As String, fullPath As String
+    fullPath = config.rootDirInfinInventories & "\" & CStr(Year(dt)) & "\" & config.makeItTwoDigits(Month(dt)) & "\" & config.makeItTwoDigits(Day(dt)) & "\"
+    
+    Dim fso As Object, folder As Object, file As Object
+    Dim zipName As String, zipCount As Long
+    
+    Set fso = New FileSystemObject
+    
+    If Not fso.FolderExists(fullPath) Then
+        Debug.Print "Folder not found: " & folderPath, vbExclamation
+        Exit Function
+    End If
+    
+    
+    Set folder = fso.GetFolder(fullPath)
+    zipCount = 0
+    zipName = ""
+    
+    For Each file In folder.Files
+        If LCase(fso.GetExtensionName(file.name)) = fileType Then
+            zipCount = zipCount + 1
+            zipName = file.name
+        End If
+    Next file
+    
+    
+    Select Case zipCount
+        Case 0
+            Debug.Print "No " & fileType & " file found in the folder.", vbInformation
+            GetUnknownBDLFileNameFromType = "0"
+        Case 1
+            GetUnknownBDLFileNameFromType = fullPath & zipName
+        Case Else
+            MsgBox "More than one " & fileType & " file found.", vbExclamation
+            GetUnknownBDLFileNameFromType = "2"
+    End Select
+    
+End Function
+
+
+
+Public Sub UnzipToParentFolder(ByVal zipFullPath As String)
+
+    Dim shellApp As Object
+    Dim fso As Object
+    Dim zipFolder, parentFolder
+    Dim zipNamespace As Object
+    Dim destNamespace As Object
+
+    Set fso = New FileSystemObject
+    Set shellApp = CreateObject("Shell.Application")
+
+    If Not fso.FileExists(zipFullPath) Then
+        MsgBox "ZIP file does not exist: " & zipFullPath, vbExclamation
+        Exit Sub
+    End If
+
+    zipFolder = zipFullPath
+    parentFolder = fso.GetParentFolderName(zipFullPath)
+
+    Set zipNamespace = shellApp.Namespace(zipFolder)
+    Set destNamespace = shellApp.Namespace(parentFolder)
+
+    If zipNamespace Is Nothing Then
+        MsgBox "Failed to open zip file with Shell.Application.", vbCritical
+        Exit Sub
+    End If
+
+    If destNamespace Is Nothing Then
+        MsgBox "Failed to resolve destination folder with Shell.Application.", vbCritical
+        Exit Sub
+    End If
+
+    destNamespace.CopyHere zipNamespace.Items, 4
+    Debug.Print "BDL File Unzipped to: " & parentFolder, vbInformation
+    
+End Sub
+
+
+

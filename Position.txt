@@ -1,0 +1,53 @@
+Option Explicit
+
+Public posID As String
+Public fund As String
+Public account As String
+Public dt As Date
+Public name As String
+Public isin As String
+Public ticker As String
+Public qty As Double
+Public price As Double
+Public ccy As String
+Public fx As Double
+
+Public quoteInPct As Double
+Public amountBaseCur As Double
+Public weight As Double
+
+Public posInstrument As Instrument
+
+
+Public Function Clone() As Position
+    Dim p As New Position
+
+
+    p.posID = Me.posID
+    p.fund = Me.fund
+    p.account = Me.account
+    p.dt = Me.dt
+    p.name = Me.name
+    p.isin = Me.isin
+    p.ticker = Me.ticker
+    p.qty = Me.qty
+    p.price = Me.price
+    p.ccy = Me.ccy
+    p.fx = Me.fx
+
+    p.quoteInPct = Me.quoteInPct
+    p.amountBaseCur = Me.amountBaseCur
+    p.weight = Me.weight
+
+    If Not Me.posInstrument Is Nothing Then
+        Set p.posInstrument = Me.posInstrument
+    End If
+
+    Set Clone = p
+    
+End Function
+
+
+
+
+

@@ -1,0 +1,151 @@
+
+
+Public Function GetLinesFromCsvFile(ByRef path As String) As String()
+    
+    If path = "" Then
+        Debug.Print "No file path given"
+        Exit Function
+    End If
+    
+    Dim fso As FileSystemObject
+    Set fso = New FileSystemObject
+        
+    If Not fso.FileExists(path) Then
+        
+        Debug.Print "No file at given directory:" & vbCr & vbCr & path, vbCritical, "Fatal"
+        Exit Function
+        
+    End If
+    
+    Dim lines() As String
+    lines = SplitLinesFromCsvFile(path)
+    
+    If isArrayEmpty(lines) Then
+        Debug.Print "Empty csv file"
+        Exit Function
+    End If
+    
+    GetLinesFromCsvFile = lines
+
+End Function
+
+
+Private Function SplitLinesFromCsvFile(ByVal path As String) As String()
+    
+    Dim lines() As String
+    
+    Dim fso As FileSystemObject
+    Set fso = New FileSystemObject
+    
+    Dim ts As Object
+    Set ts = fso.OpenTextFile(path, 1)
+    
+    Dim csvContent As String
+    On Error GoTo cleanExit
+    csvContent = ts.ReadAll
+    
+    If InStr(csvContent, vbCrLf) > 0 Then
+        lines = Split(csvContent, vbCrLf)
+    
+    ElseIf InStr(csvContent, vbLf) > 0 Then
+        lines = Split(csvContent, vbLf)
+    
+    ElseIf InStr(csvContent, vbCr) > 0 Then
+        lines = Split(csvContent, vbCr)
+        
+    Else
+        lines = Array(csvContent)
+    
+    End If
+
+cleanExit:
+    ts.Close
+    SplitLinesFromCsvFile = lines
+
+
+End Function
+
+
+
+'Public Function SplitLine(ByVal line As String) As Variant
+'
+'    If InStr(line, ",") > 0 Then
+'        SplitLine = Split(line, ",")
+'
+'    ElseIf InStr(line, ";") > 0 Then
+'        SplitLine = Split(line, ";")
+'
+'    Else
+'        SplitLine = Array()
+'        MsgBox ("Unable to find the seperation charactere (, or ;) in the following line: " & _
+'                vbCrLf & vbCrLf & line)
+'    End If
+'
+'    'instable, simplifier avec ça, mais problème potentiel si autre délimiteur. Pas de solution simple à ce problème, mais possible de mettre qqch d'un peu plus lourd en place
+'    'le gros problème est le séparateur dépend des paramêtres systèmes du créateur du CSV. Si on n'utilise que des CSV de INFIN, alors ","
+'    SplitLine = Split(line, """,""")
+'
+'End Function
+
+Function SplitLine(ByVal sLine As String) As String()
+    Dim inQuotes As Boolean
+    Dim i As Long
+    Dim ch As String
+    Dim curField As String
+    Dim fields() As String
+    Dim fieldCount As Long
+    
+    fieldCount = 0
+    curField = ""
+    inQuotes = False
+    
+    For i = 1 To Len(sLine)
+        ch = Mid(sLine, i, 1)
+        
+        If ch = """" Then
+            ' Check if we have an escaped quote ("")
+            If inQuotes And i < Len(sLine) And Mid(sLine, i + 1, 1) = """" Then
+                curField = curField & """"
+                i = i + 1  ' Skip the next quote
+            Else
+                inQuotes = Not inQuotes
+            End If
+            
+        ElseIf ch = "," And Not inQuotes Then
+            ' End of a field
+            ReDim Preserve fields(fieldCount)
+            fields(fieldCount) = curField
+            curField = ""
+            fieldCount = fieldCount + 1
+        Else
+            curField = curField & ch
+        End If
+    Next i
+    
+    ' Add the last field
+    ReDim Preserve fields(fieldCount)
+    fields(fieldCount) = curField
+    
+    SplitLine = fields
+End Function
+
+
+
+Public Sub WriteLinesToFile(filePath As String, lines As Collection)
+
+    Dim fso As Object
+    Set fso = New FileSystemObject
+
+    Dim ts As Object
+    Set ts = fso.CreateTextFile(filePath, True) ' True = overwrite
+
+    Dim line As Variant
+    For Each line In lines
+        ts.WriteLine line
+    Next line
+
+    ts.Close
+    
+End Sub
+
+

@@ -1,0 +1,142 @@
+Option Explicit
+
+
+Public Static Function GetInstrumentsFromFile(ByVal path As String, ByVal byInfinId As Boolean) As Dictionary
+        
+    Dim lines() As Variant
+    lines = ExcelFactory.GetLinesFromExcelFile(path, , True)
+    If CommunFactory.isArrayEmpty(lines) Then
+        MsgBox "No referential found at:" & vbCr & vbCr & path & vbCr & vbCr & "Please perform referential extraction from INFIN emails.", vbCritical, "Fatal"
+        Set GetInstrumentsFromFile = New Dictionary
+        Exit Function
+    End If
+    
+    Dim inst As Instrument
+    Dim instruments As Dictionary
+    Set instruments = New Dictionary
+    
+    Dim config As Configuration
+    Set config = data.GetConfiguration
+    
+    Dim i As Integer, line As Variant, key As String, assetClass As String
+    
+    Dim columnsDict As Dictionary
+    Set columnsDict = createColumnsDictFromInventory(lines(1))
+    
+    For i = LBound(lines) + 1 To UBound(lines)  'remove headers
+        
+        line = lines(i)
+        assetClass = LCase(line(columnsDict("Asset Class")))
+        
+        If byInfinId Then
+            key = line(columnsDict("SecurityId"))         'infind id
+        ElseIf LCase(assetClass) = "cash" Then
+            key = line(columnsDict("Name"))         'ccy
+        Else
+            key = UCase(line(columnsDict("Bloomberg Ticker"))) 'ticker
+        End If
+        
+        If key <> "" And Not IsEmpty(assetClass) Then
+        
+            Set inst = CreateInstrument(line, columnsDict)
+        
+            If byInfinId Then
+            
+                instruments.Add key, inst
+            
+            Else
+            
+                If Not instruments.Exists(assetClass) Then instruments.Add assetClass, New Dictionary
+                
+                If LCase(inst.name) <> "a supprimer" Then
+                    
+                    If Not instruments(assetClass).Exists(key) Then instruments(assetClass).Add key, New Dictionary
+                    
+                    If instruments(assetClass)(key).Exists(inst.isin) Then
+                        Debug.Print "DATABASE WARNING - 2 instrument with identical isin and ticker found: " & inst.isin & " - " & inst.ticker
+                    Else
+                        instruments(assetClass)(key).Add inst.isin, inst
+                    End If
+                End If
+            
+            End If
+        
+        End If
+            
+    Next i
+    
+    Set GetInstrumentsFromFile = instruments
+    
+End Function
+
+
+
+Private Function createColumnsDictFromInventory(ByVal line As Variant) As Dictionary
+    
+    Dim c As Integer, columnsNumber As Dictionary
+    Set columnsNumber = New Dictionary
+    
+    For c = 1 To UBound(line)
+        columnsNumber.Add line(c), c
+    Next c
+
+    Set createColumnsDictFromInventory = columnsNumber
+
+End Function
+
+
+
+Public Static Function CreateInstrument(ByVal line As Variant, ByVal columnsDict As Dictionary) As Instrument
+
+    Dim inst As Instrument
+    Set inst = New Instrument
+    
+    'required attributes
+    If columnsDict.Exists("SecurityId") Then inst.instrumentId = line(columnsDict("SecurityId"))
+    If columnsDict.Exists("Infin Symbol") Then inst.symbol = CStr(Replace(line(columnsDict("Infin Symbol")), """", ""))
+    If columnsDict.Exists("Name") Then inst.name = CStr(Replace(line(columnsDict("Name")), """", ""))
+    If columnsDict.Exists("ISIN") Then inst.isin = CStr(Replace(line(columnsDict("ISIN")), """", ""))
+    If columnsDict.Exists("Bloomberg Ticker") Then inst.ticker = CStr(Replace(line(columnsDict("Bloomberg Ticker")), """", ""))
+    
+    If columnsDict.Exists("Currency") Then inst.ccy = CStr(Replace(line(columnsDict("Currency")), """", ""))
+    If columnsDict.Exists("Geography") Then inst.geography = CStr(Replace(line(columnsDict("Geography")), """", ""))
+    If columnsDict.Exists("Country") Then inst.country = CStr(Replace(line(columnsDict("Country")), """", ""))
+    If columnsDict.Exists("Asset Class") Then inst.assetClass = CStr(Replace(line(columnsDict("Asset Class")), """", ""))
+    If columnsDict.Exists("Category") Then inst.category = CStr(Replace(line(columnsDict("Category")), """", ""))
+    If columnsDict.Exists("Sub Category") Then inst.subCategory = CStr(Replace(line(columnsDict("Sub Category")), """", ""))
+    If columnsDict.Exists("Exchange") Then inst.exchange = CStr(Replace(line(columnsDict("Exchange")), """", ""))
+    
+    'optional attributes
+    If columnsDict.Exists("Delta") Then If CStr(line(columnsDict("Delta"))) <> "" Then inst.equityDelta = CDbl(Replace(line(columnsDict("Delta")), ".", Application.International(xlDecimalSeparator)))
+    If columnsDict.Exists("Custom Property-Capital Guaranteed") Then If CStr(line(columnsDict("Custom Property-Capital Guaranteed"))) <> "" Then inst.guaranteedCapital = CDbl(Replace(line(columnsDict("Custom Property-Capital Guaranteed")), ".", Application.International(xlDecimalSeparator)))
+    
+    If columnsDict.Exists("Close") Then If CStr(line(columnsDict("Close"))) <> "" Then inst.lastClose = CDbl(Replace(line(columnsDict("Close")), ".", Application.International(xlDecimalSeparator)))
+    If columnsDict.Exists("Close_Date") Then If CStr(line(columnsDict("Close_Date"))) <> "" Then inst.lastCloseDate = CDate(CStr(Replace(line(columnsDict("Close_Date")), """", "")))
+    
+    If columnsDict.Exists("BondRatingSP") Then If CStr(line(columnsDict("BondRatingSP"))) <> "" Then inst.agenciesRatings.Add "SP", CStr(Replace(line(columnsDict("BondRatingSP")), """", ""))
+    If columnsDict.Exists("BondRatingFitch") Then If CStr(line(columnsDict("BondRatingFitch"))) <> "" Then inst.agenciesRatings.Add "Fitch", CStr(Replace(line(columnsDict("BondRatingFitch")), """", ""))
+    If columnsDict.Exists("BondRatingMoody") Then If CStr(line(columnsDict("BondRatingMoody"))) <> "" Then inst.agenciesRatings.Add "Moodys", CStr(Replace(line(columnsDict("BondRatingMoody")), """", ""))
+    
+    If columnsDict.Exists("Issuer") Then If CStr(line(columnsDict("Issuer"))) <> "" Then inst.issuer = CStr(Replace(line(columnsDict("Issuer")), """", ""))
+    If columnsDict.Exists("Issuer Country") Then If CStr(line(columnsDict("Issuer Country"))) <> "" Then inst.issuerCountry = CStr(Replace(line(columnsDict("Issuer Country")), """", ""))
+    If columnsDict.Exists("IssuerLTRatingSP") Then If CStr(line(columnsDict("IssuerLTRatingSP"))) <> "" Then inst.issuerLtRatingSP = CStr(Replace(line(columnsDict("IssuerLTRatingSP")), """", ""))
+    
+    If columnsDict.Exists("ManCo") Then If CStr(line(columnsDict("ManCo"))) <> "" Then inst.manCo = CStr(Replace(line(columnsDict("ManCo")), """", ""))
+    If columnsDict.Exists("FIA") Then If CStr(line(columnsDict("FIA"))) <> "" Then inst.isFIA = CBool(Replace(line(columnsDict("FIA")), """", ""))
+    
+    If columnsDict.Exists("Quoted in percent") Then If CStr(line(columnsDict("Quoted in percent"))) <> "" Then inst.quoteInPct = CBool(Replace(line(columnsDict("Quoted in percent")), """", ""))
+    
+    inst.ComputeMinRating
+    
+    Set CreateInstrument = inst
+    
+End Function
+
+
+
+
+
+
+
+
+
