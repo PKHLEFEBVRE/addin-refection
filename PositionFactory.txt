@@ -1,6 +1,6 @@
 Option Explicit
 
-Public Static Function GetPositionsByDateFromInfinCsvFile(ByRef path As String, ByVal dt As Date, ByVal fundId As String) As Dictionary
+Public Static Function GetPositionsByDateFromInfinCsvFile(ByRef path As String, ByVal dt As Date, ByRef fund As Portfolio) As Dictionary
 
     Dim lines() As String
     lines = CsvFactory.GetLinesFromCsvFile(path)
@@ -13,20 +13,16 @@ Public Static Function GetPositionsByDateFromInfinCsvFile(ByRef path As String, 
     Dim positions As Dictionary
     Set positions = New Dictionary
 
-    Dim line As Variant, aum As Double
-    aum = 0
+    Dim line As Variant
 
     For Each line In lines
         If Len(line) > 0 Then
-            Set pos = ExtractPositionFromCsvLine(line, dt, fundId, instruments)
+            Set pos = ExtractPositionFromCsvLine(line, dt, fund, instruments)
             positions.Add pos.posID, pos
-            aum = aum + pos.amountBaseCur
         End If
     Next line
 
-    For Each posID In positions
-        positions(posID).weight = positions(posID).amountBaseCur / aum
-    Next posID
+    ' Weight calculation logic removed - now handled in Portfolio.GetPositions
 
     Set GetPositionsByDateFromInfinCsvFile = positions
 
@@ -34,7 +30,7 @@ End Function
 
 
 
-Public Static Function GetPositionsByDateFromXmlFile(ByVal dt As Date, ByVal fundId As String) As Dictionary
+Public Static Function GetPositionsByDateFromXmlFile(ByVal dt As Date, ByRef fund As Portfolio) As Dictionary
 
     Dim dtM1 As Date
     dtM1 = Application.WorksheetFunction.WorkDay(dt, -1)
@@ -54,10 +50,14 @@ Public Static Function GetPositionsByDateFromXmlFile(ByVal dt As Date, ByVal fun
     Set instruments = data.GetInstruments(dt, False)
 
     Dim positions As Dictionary
-    Set positions = XmlFactory.CreatePositionsDictFromXmlPath(BDLXmlFilePath, fundId, instruments)
+    Set positions = XmlFactory.CreatePositionsDictFromXmlPath(BDLXmlFilePath, fund, instruments)
 
     If Not positions Is Nothing Then
         Dim pos As Variant
+        ' Determine ID to use
+        Dim fundId As String
+        If fund.InfinId <> "" Then fundId = fund.InfinId Else fundId = fund.Name
+
         For Each pos In positions
             positions(pos).account = fundId
         Next pos
@@ -71,13 +71,17 @@ End Function
 
 
 
-Private Function ExtractPositionFromCsvLine(ByVal line As String, ByVal dt As Date, ByVal fundId As String, ByRef instruments As Dictionary) As Position
+Private Function ExtractPositionFromCsvLine(ByVal line As String, ByVal dt As Date, ByRef fund As Portfolio, ByRef instruments As Dictionary) As Position
 
     Dim splittedLine() As String
     splittedLine = CsvFactory.SplitLine(line)
 
     Dim posInstrument As Instrument
     If instruments.Exists(splittedLine(1)) Then Set posInstrument = instruments(splittedLine(1))
+
+    ' Determine ID to use
+    Dim fundId As String
+    If fund.InfinId <> "" Then fundId = fund.InfinId Else fundId = fund.Name
 
     Set ExtractPositionFromCsvLine = CreatePosition(splittedLine(1), fundId, splittedLine(11), dt, _
         splittedLine(2), splittedLine(3), splittedLine(9), splittedLine(5), _

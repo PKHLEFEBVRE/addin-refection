@@ -82,8 +82,8 @@ Public Static Function CreatePortfolio(ByVal line As Variant, ByVal columnsDict 
     If columnsDict.Exists("custodian") Then port.custodian = CStr(Replace(line(columnsDict("custodian")), """", ""))
     If columnsDict.Exists("sales") Then port.sales = CStr(Replace(line(columnsDict("sales")), """", ""))
 
-    ' Mapped properties change: accountType -> MandatType, added Type
-    If columnsDict.Exists("Type") Then port.Type = CStr(Replace(line(columnsDict("Type")), """", ""))
+    ' Mapped properties change: AccountType -> MandatType, Type -> FundType
+    If columnsDict.Exists("Type") Then port.FundType = CStr(Replace(line(columnsDict("Type")), """", ""))
     If columnsDict.Exists("AccountType") Then port.MandatType = CStr(Replace(line(columnsDict("AccountType")), """", ""))
 
     If columnsDict.Exists("AVType") Then port.AVType = CStr(Replace(line(columnsDict("AVType")), """", ""))
@@ -126,9 +126,57 @@ Public Sub LoadPositionsForType(portfolios As Dictionary, typeFilter As String, 
 
     For Each key In portfolios
         Set port = portfolios(key)
-        If LCase(port.Type) = LCase(typeFilter) Then
+        If LCase(port.FundType) = LCase(typeFilter) Then
             port.GetPositions dt
         End If
     Next key
 
 End Sub
+
+
+Public Static Function CreateDiffPortfolio(port As Portfolio, bench As Portfolio) As Portfolio
+
+    Dim diffPort As Portfolio
+    Set diffPort = New Portfolio
+
+    diffPort.Name = port.Name & " vs " & bench.Name
+    diffPort.FundType = "Difference"
+    diffPort.MandatType = port.MandatType
+    diffPort.ccy = port.ccy
+
+    ' Initialize positions dict
+    Set diffPort.positions = New Dictionary
+
+    Dim pPos As Position, bPos As Position, newPos As Position
+    Dim key As Variant
+
+    ' Add all positions from Portfolio (Positive Weight)
+    If Not port.positions Is Nothing Then
+        For Each key In port.positions
+            Set pPos = port.positions(key)
+            Set newPos = pPos.Clone()
+            ' Ensure clone keeps weight (Clone method does)
+            diffPort.positions.Add newPos.posID, newPos
+        Next key
+    End If
+
+    ' Subtract positions from Benchmark
+    If Not bench.positions Is Nothing Then
+        For Each key In bench.positions
+            Set bPos = bench.positions(key)
+
+            If diffPort.positions.Exists(bPos.posID) Then
+                ' Position exists, update weight
+                diffPort.positions(bPos.posID).weight = diffPort.positions(bPos.posID).weight - bPos.weight
+            Else
+                ' Position does not exist, add with negative weight
+                Set newPos = bPos.Clone()
+                newPos.weight = -bPos.weight
+                diffPort.positions.Add newPos.posID, newPos
+            End If
+        Next key
+    End If
+
+    Set CreateDiffPortfolio = diffPort
+
+End Function
