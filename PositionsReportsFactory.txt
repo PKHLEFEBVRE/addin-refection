@@ -77,3 +77,46 @@ Private Function HasMember(obj As Object, memberName As String) As Boolean
     HasMember = (Err.Number = 0)
     Err.Clear
 End Function
+
+
+Public Function GetAggregatedExposure(portfolios As Dictionary, key1 As String, Optional key2 As String = "") As Variant
+
+    Dim exposureDicts As New Dictionary
+    Dim uniqueKeys As New Dictionary
+    Dim portKey As Variant
+    Dim port As Portfolio
+    Dim expDict As Dictionary
+    Dim expKey As Variant
+    Dim result(0 To 1) As Variant ' 0: dict of dicts, 1: unique keys dict
+
+    For Each portKey In portfolios
+        Set port = portfolios(portKey)
+
+        Set expDict = GetExposure(port, key1, key2)
+        exposureDicts.Add portKey, expDict
+
+        For Each expKey In expDict
+            If Not uniqueKeys.Exists(expKey) Then
+                uniqueKeys.Add expKey, expKey
+            End If
+        Next expKey
+    Next portKey
+
+    Set result(0) = exposureDicts
+    Set result(1) = uniqueKeys
+
+    GetAggregatedExposure = result
+
+End Function
+
+Public Function GetExposureReport(portfolios As Dictionary, key1 As String, Optional key2 As String = "") As Variant
+
+    Dim aggData As Variant
+    aggData = GetAggregatedExposure(portfolios, key1, key2)
+
+    Dim table As Variant
+    table = CommunFactory.TurnExposureDictsToTable(aggData(0), aggData(1))
+
+    GetExposureReport = table
+
+End Function

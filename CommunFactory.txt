@@ -1,3 +1,5 @@
+Option Explicit
+
 Public Function isArrayEmpty(myArr As Variant) As Boolean
 
     If IsArray(myArr) = False Then isArrayEmpty = True
@@ -1332,26 +1334,50 @@ Function ArrayToHTML(dataArray As Variant, Optional colsToKeep As Variant) As St
     ArrayToHTML = html
 End Function
 
-Public Function DictionaryToArray(dict As Dictionary) As Variant
+Public Function TurnExposureDictsToTable(exposureDicts As Dictionary, uniqueKeys As Variant) As Variant
 
-    Dim k As Variant
-    Dim arr() As Variant
-    Dim i As Long
+    Dim r As Long, c As Long
+    Dim nRows As Long, nCols As Long
+    Dim result() As Variant
+    Dim portKey As Variant
+    Dim expKey As Variant
+    Dim expDict As Dictionary
+    Dim colMap As New Dictionary ' Maps exposure key to column index
 
-    If dict.count = 0 Then
-        DictionaryToArray = Array()
-        Exit Function
-    End If
+    nRows = exposureDicts.count + 1 ' Header + Portfolios
+    nCols = uniqueKeys.count + 1    ' PortfolioName + ExposureKeys
 
-    ReDim arr(1 To dict.count, 1 To 2)
+    ReDim result(1 To nRows, 1 To nCols)
 
-    i = 1
-    For Each k In dict.Keys
-        arr(i, 1) = k
-        arr(i, 2) = dict(k)
-        i = i + 1
-    Next k
+    ' Header Row
+    result(1, 1) = "Portfolio"
+    c = 2
+    For Each expKey In uniqueKeys
+        result(1, c) = expKey
+        colMap.Add expKey, c
+        c = c + 1
+    Next expKey
 
-    DictionaryToArray = arr
+    ' Data Rows
+    r = 2
+    For Each portKey In exposureDicts
+        result(r, 1) = portKey
+        Set expDict = exposureDicts(portKey)
+
+        For Each expKey In expDict
+            If colMap.Exists(expKey) Then
+                result(r, colMap(expKey)) = expDict(expKey)
+            End If
+        Next expKey
+
+        ' Fill empty cells with 0
+        For c = 2 To nCols
+            If IsEmpty(result(r, c)) Then result(r, c) = 0
+        Next c
+
+        r = r + 1
+    Next portKey
+
+    TurnExposureDictsToTable = result
 
 End Function
