@@ -10,7 +10,8 @@ Public creationDate As Date
 Public insurer As String
 Public custodian As String
 Public sales As String
-Public accountType As String
+Public MandatType As String
+Public Type As String
 Public AVType As String
 Public ccy As String
 Public profile As String
@@ -29,3 +30,17 @@ Private Sub Class_Initialize()
     Set positions = New Dictionary
 
 End Sub
+
+Public Function GetPositions(dt As Date) As Dictionary
+
+    Dim inventoryId As String
+    inventoryId = InfinId
+    If inventoryId = "" Then inventoryId = Name
+
+    If inventoryId <> "" Then
+        Set positions = Data.GetInventory(dt, inventoryId)
+    End If
+
+    Set GetPositions = positions
+
+End Function
