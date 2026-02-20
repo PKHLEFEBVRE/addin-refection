@@ -201,32 +201,33 @@ Public Sub EnrichPortfoliosFromDashboard(portfolios As Dictionary, ws As Workshe
 
     Dim key As String
     Dim port As Portfolio
-    Dim val As Variant
+    Dim foundPortfolios As Dictionary
+    Set foundPortfolios = New Dictionary
 
     ' Loop Data
     For r = 2 To UBound(data, 1)
 
         ' Identify Portfolio (Key)
-        ' Assuming "Account name" is the primary key used in the Dashboard sheet
+        ' Assuming "InfinId" exists in Dashboard, else using "Account name" as proxy to InfinId or Name
         key = ""
-        If headers.Exists("Account name") Then
+        If headers.Exists("InfinId") Then
+            key = CStr(data(r, headers("InfinId")))
+        ElseIf headers.Exists("Account name") Then
             key = CStr(data(r, headers("Account name")))
         End If
 
-        ' Find Portfolio
-        ' Note: portfolios dict might be keyed by InfinId or Name. We check both if possible or rely on Name.
-        ' Since GetPortfoliosFromFile uses Name if InfinId is missing, we try to match Name here.
-        ' However, the main dict keys might be IDs. We might need to scan if direct lookup fails.
-
         Set port = Nothing
-        ' Try direct lookup if key matches dictionary key logic
+
+        ' 1. Direct Lookup
         If portfolios.Exists(key) Then
             Set port = portfolios(key)
         Else
-            ' Fallback: Scan by Name or AccountName
+            ' 2. Fallback Scan (by Name/AccountName/InfinId)
             Dim pKey As Variant
             For Each pKey In portfolios
-                If LCase(portfolios(pKey).accountName) = LCase(key) Or LCase(portfolios(pKey).Name) = LCase(key) Then
+                If LCase(portfolios(pKey).InfinId) = LCase(key) Or _
+                   LCase(portfolios(pKey).accountName) = LCase(key) Or _
+                   LCase(portfolios(pKey).Name) = LCase(key) Then
                     Set port = portfolios(pKey)
                     Exit For
                 End If
@@ -234,6 +235,10 @@ Public Sub EnrichPortfoliosFromDashboard(portfolios As Dictionary, ws As Workshe
         End If
 
         If Not port Is Nothing Then
+            ' Mark as found
+            If Not foundPortfolios.Exists(port.InfinId) Then foundPortfolios.Add port.InfinId, True
+            If Not foundPortfolios.Exists(port.Name) Then foundPortfolios.Add port.Name, True
+
             ' Update Attributes
             If headers.Exists("Client") Then port.client = CStr(data(r, headers("Client")))
 
@@ -257,5 +262,37 @@ Public Sub EnrichPortfoliosFromDashboard(portfolios As Dictionary, ws As Workshe
         End If
 
     Next r
+
+    ' Check for missing portfolios
+    Dim missingList As String
+    Dim p As Variant
+    Dim missingCount As Long
+
+    missingCount = 0
+    For Each p In portfolios
+        ' Check if the portfolio (by InfinId or Name) was found in the dashboard
+        ' portfolios dict key is likely InfinId or Name
+        ' We check if the object itself was processed (using its unique IDs)
+        Dim pObj As Portfolio
+        Set pObj = portfolios(p)
+
+        ' Check either InfinId or Name in the found set
+        Dim wasFound As Boolean
+        wasFound = False
+        If foundPortfolios.Exists(pObj.InfinId) Then wasFound = True
+        If foundPortfolios.Exists(pObj.Name) Then wasFound = True
+
+        If Not wasFound Then
+            missingList = missingList & vbCrLf & "- " & pObj.Name & " (" & pObj.InfinId & ")"
+            missingCount = missingCount + 1
+        End If
+    Next p
+
+    If missingCount > 0 Then
+        MsgBox "CRITICAL ERROR: The following portfolios are missing from the Dashboard sheet." & vbCrLf & _
+               "Please update the dashboard and retry." & vbCrLf & vbCrLf & _
+               missingList, vbCritical, "Dashboard Sync Error"
+        Err.Raise vbObjectError + 500, "EnrichPortfoliosFromDashboard", "Portfolios missing from Dashboard sheet."
+    End If
 
 End Sub
