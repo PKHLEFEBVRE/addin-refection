@@ -1,46 +1,46 @@
 Option Explicit
 
-Public Static Function GetPositionsByDateFromInfinCsvFile(ByRef path As String, ByVal dt As Date, ByVal mandateId As String) As Dictionary
-    
+Public Static Function GetPositionsByDateFromInfinCsvFile(ByRef path As String, ByVal dt As Date, ByVal fundId As String) As Dictionary
+
     Dim lines() As String
     lines = CsvFactory.GetLinesFromCsvFile(path)
     If CommunFactory.isArrayEmpty(lines) Then Exit Function
-    
+
     Dim instruments As Dictionary
     Set instruments = data.GetInstruments(dt, True)
-            
+
     Dim pos As Position, posID As Variant
     Dim positions As Dictionary
     Set positions = New Dictionary
-    
+
     Dim line As Variant, aum As Double
     aum = 0
-    
+
     For Each line In lines
         If Len(line) > 0 Then
-            Set pos = ExtractPositionFromCsvLine(line, dt, mandateId, instruments)
+            Set pos = ExtractPositionFromCsvLine(line, dt, fundId, instruments)
             positions.Add pos.posID, pos
             aum = aum + pos.amountBaseCur
         End If
     Next line
-    
+
     For Each posID In positions
         positions(posID).weight = positions(posID).amountBaseCur / aum
     Next posID
-    
+
     Set GetPositionsByDateFromInfinCsvFile = positions
-    
+
 End Function
 
 
 
-Public Static Function GetPositionsByDateFromXmlFile(ByVal dt As Date, ByVal mandateId As String) As Dictionary
-    
+Public Static Function GetPositionsByDateFromXmlFile(ByVal dt As Date, ByVal fundId As String) As Dictionary
+
     Dim dtM1 As Date
     dtM1 = Application.WorksheetFunction.WorkDay(dt, -1)
-    
+
     Set GetPositionsByDateFromXmlFile = Nothing
-    
+
     Dim BDLZipFilePath As String, BDLXmlFilePath As String
     BDLXmlFilePath = ZipFactory.GetUnknownBDLFileNameFromType(dtM1, "xml")
     If BDLXmlFilePath = "0" Then
@@ -49,37 +49,37 @@ Public Static Function GetPositionsByDateFromXmlFile(ByVal dt As Date, ByVal man
         ZipFactory.UnzipToParentFolder (BDLZipFilePath)
         BDLXmlFilePath = ZipFactory.GetUnknownBDLFileNameFromType(dtM1, "xml")
     End If
-    
+
     Dim instruments As Dictionary
     Set instruments = data.GetInstruments(dt, False)
-    
+
     Dim positions As Dictionary
-    Set positions = XmlFactory.CreatePositionsDictFromXmlPath(BDLXmlFilePath, mandateId, instruments)
-    
+    Set positions = XmlFactory.CreatePositionsDictFromXmlPath(BDLXmlFilePath, fundId, instruments)
+
     If Not positions Is Nothing Then
         Dim pos As Variant
         For Each pos In positions
-            positions(pos).account = mandateId
+            positions(pos).account = fundId
         Next pos
-        
+
         Set GetPositionsByDateFromXmlFile = positions
     End If
-    
-    'Kill BDLXmlFilePath
-    
-End Function
- 
- 
 
-Private Function ExtractPositionFromCsvLine(ByVal line As String, ByVal dt As Date, ByVal mandateId As String, ByRef instruments As Dictionary) As Position
-    
+    'Kill BDLXmlFilePath
+
+End Function
+
+
+
+Private Function ExtractPositionFromCsvLine(ByVal line As String, ByVal dt As Date, ByVal fundId As String, ByRef instruments As Dictionary) As Position
+
     Dim splittedLine() As String
     splittedLine = CsvFactory.SplitLine(line)
-    
+
     Dim posInstrument As Instrument
     If instruments.Exists(splittedLine(1)) Then Set posInstrument = instruments(splittedLine(1))
-    
-    Set ExtractPositionFromCsvLine = CreatePosition(splittedLine(1), mandateId, splittedLine(11), dt, _
+
+    Set ExtractPositionFromCsvLine = CreatePosition(splittedLine(1), fundId, splittedLine(11), dt, _
         splittedLine(2), splittedLine(3), splittedLine(9), splittedLine(5), _
         splittedLine(6), splittedLine(7), splittedLine(10), posInstrument)
 
@@ -110,7 +110,7 @@ Public Static Function CreatePosition(posID As Variant, fund As Variant, account
 
     Dim pos As Position
     Set pos = New Position
-    
+
     pos.fund = CStr(Replace(fund, """", ""))
     pos.account = CStr(Replace(account, """", ""))
     pos.dt = CDate(dt)
@@ -122,29 +122,29 @@ Public Static Function CreatePosition(posID As Variant, fund As Variant, account
     pos.price = CDbl(Replace(price, ".", Application.International(xlDecimalSeparator)))
     pos.ccy = Replace(ccy, """", "")
     pos.fx = CDbl(Replace(fx, ".", Application.International(xlDecimalSeparator)))
-    
-    
+
+
     If pos.name <> pos.ccy Or (pos.name = pos.ccy And (pos.account = pos.fund Or InStr(1, LCase(pos.account), "main") > 0)) Then
         pos.posID = posID
     Else
         pos.posID = posID & " " & pos.account
     End If
-    
-    
+
+
     pos.quoteInPct = 1
     If Not posInstrument Is Nothing Then
         Set pos.posInstrument = posInstrument
         If pos.posInstrument.quoteInPct Then pos.quoteInPct = 0.01
     End If
-    
+
     '___________________________'
     EXCEPTIONNAL_ADJUSTMENTS pos
     '¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯'
-    
+
     pos.amountBaseCur = pos.qty * pos.price * pos.fx * pos.quoteInPct
-    
+
     Set CreatePosition = pos
-    
+
 End Function
 
 Private Function EXCEPTIONNAL_ADJUSTMENTS(ByRef pos As Position)
@@ -153,12 +153,3 @@ Private Function EXCEPTIONNAL_ADJUSTMENTS(ByRef pos As Position)
     If pos.isin = "XS0461632811" And pos.fund = "70598445" Then pos.qty = 0
 
 End Function
-
-
-
-
-
-
-
-
-

@@ -1,6 +1,6 @@
 Option Explicit
 
-Public Static Function GetPortfoliosFromFile(ByVal path As String) As Dictionary
+Public Static Function GetPortfoliosFromFile(ByVal path As String, ByVal dt As Date) As Dictionary
 
     Dim lines() As Variant
     lines = ExcelFactory.GetLinesFromExcelFile(path, , True)
@@ -14,7 +14,7 @@ Public Static Function GetPortfoliosFromFile(ByVal path As String) As Dictionary
     Dim portfolios As Dictionary
     Set portfolios = New Dictionary
 
-    Dim i As Integer, line As Variant, key As String
+    Dim i As Integer, line As Variant, key As String, inventoryId As String
 
     Dim columnsDict As Dictionary
     Set columnsDict = createColumnsDictFromInventory(lines(1))
@@ -35,6 +35,16 @@ Public Static Function GetPortfoliosFromFile(ByVal path As String) As Dictionary
 
         If key <> "" Then
             Set port = CreatePortfolio(line, columnsDict)
+
+            ' Load inventory
+            ' Using InfinId as fundId if available, else Name
+            inventoryId = port.InfinId
+            If inventoryId = "" Then inventoryId = port.Name
+
+            If inventoryId <> "" Then
+                Set port.positions = Data.GetInventory(dt, inventoryId)
+            End If
+
             If Not portfolios.Exists(key) Then
                 portfolios.Add key, port
             Else

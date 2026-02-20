@@ -22,7 +22,7 @@ Public Sub ResetSingleton()
 End Sub
 
 
-Public Function GetInventory(ByVal dt As Date, ByVal mandateId As String) As Dictionary
+Public Function GetInventory(ByVal dt As Date, ByVal fundId As String) As Dictionary
 
     On Error GoTo errorHandler
 
@@ -30,19 +30,19 @@ Public Function GetInventory(ByVal dt As Date, ByVal mandateId As String) As Dic
     Set ref = data.GetReferential()
 
     Dim positions As Dictionary
-    Set positions = ref.GetInventoryInfin(dt, mandateId)
+    Set positions = ref.GetInventoryInfin(dt, fundId)
 
     If positions Is Nothing Then
-        Debug.Print "cobDate = " & dt & " with no position found in inventory of mandate " & mandateId
+        Debug.Print "cobDate = " & dt & " with no position found in inventory of fund " & fundId
     Else
-        Debug.Print "cobDate = " & dt & " with " & positions.count & " positions found in inventory of mandate " & mandateId
+        Debug.Print "cobDate = " & dt & " with " & positions.count & " positions found in inventory of fund " & fundId
     End If
 
     Set GetInventory = positions
     Exit Function
 
 errorHandler:
-    MsgBox "An error occurred on mandate " & mandateId & " on date " & dt & "." & vbCr & vbCr & Err.Number & " - " & Err.Description, vbExclamation, "Error"
+    MsgBox "An error occurred on fund " & fundId & " on date " & dt & "." & vbCr & vbCr & Err.Number & " - " & Err.Description, vbExclamation, "Error"
     Set GetInventory = New Dictionary
 End Function
 

@@ -1,6 +1,6 @@
 Option Explicit
 
-Private PositionsByDateByMandateId As New Dictionary
+Private PositionsByDateByFundId As New Dictionary
 Private InstrumentsInfinByKey As New Dictionary
 Private PortfoliosByKey As New Dictionary
 
@@ -15,18 +15,18 @@ Private Sub Class_Initialize()
 End Sub
 
 
-Public Property Get GetInventoryInfin(ByRef dt As Date, ByRef mandateId As String) As Dictionary
+Public Property Get GetInventoryInfin(ByRef dt As Date, ByRef fundId As String) As Dictionary
 
     Dim positionsByDate As Dictionary
 
-    If PositionsByDateByMandateId.Exists(mandateId) Then
+    If PositionsByDateByFundId.Exists(fundId) Then
 
-        Set positionsByDate = PositionsByDateByMandateId(mandateId)
+        Set positionsByDate = PositionsByDateByFundId(fundId)
 
     Else
 
         Set positionsByDate = New Dictionary
-        PositionsByDateByMandateId.Add mandateId, positionsByDate
+        PositionsByDateByFundId.Add fundId, positionsByDate
 
     End If
 
@@ -42,14 +42,14 @@ Public Property Get GetInventoryInfin(ByRef dt As Date, ByRef mandateId As Strin
         Dim path As String
         Dim config As New Configuration
 
-        If config.FundsThroughXml.Exists(mandateId) Then
+        If config.FundsThroughXml.Exists(fundId) Then
 
-            Set positions = PositionFactory.GetPositionsByDateFromXmlFile(dt, mandateId)
+            Set positions = PositionFactory.GetPositionsByDateFromXmlFile(dt, fundId)
 
         Else
 
-            path = config.CreateInventoryCsvPath(dt, mandateId)
-            Set positions = PositionFactory.GetPositionsByDateFromInfinCsvFile(path, dt, mandateId)
+            path = config.CreateInventoryCsvPath(dt, fundId)
+            Set positions = PositionFactory.GetPositionsByDateFromInfinCsvFile(path, dt, fundId)
 
         End If
 
@@ -117,7 +117,7 @@ Public Property Get GetPortfoliosInfinByKey(ByRef dt As Date) As Dictionary
         Dim config As New Configuration
 
         path = config.CreatePortfoliosReferentialPath(dt)
-        Set portfolios = PortfolioFactory.GetPortfoliosFromFile(path)
+        Set portfolios = PortfolioFactory.GetPortfoliosFromFile(path, dt)
 
         PortfoliosByKey.Add dt, portfolios
 

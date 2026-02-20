@@ -40,13 +40,13 @@ Private Sub Class_Initialize()
 End Sub
 
 
-Public Function CreateInventoryCsvPath(ByVal dt As Date, ByVal mandateId As String) As String
+Public Function CreateInventoryCsvPath(ByVal dt As Date, ByVal fundId As String) As String
 
     Dim fileName As String, fullPath As String
 
     dt = Application.WorksheetFunction.WorkDay(dt, -1)
 
-    fileName = "Inventaire_" & mandateId & "_" & CStr(Format(dt, "YYYYMMDD")) & ".csv"
+    fileName = "Inventaire_" & fundId & "_" & CStr(Format(dt, "YYYYMMDD")) & ".csv"
     fullPath = rootDirInfinInventories & "\" & CStr(Year(dt)) & "\" & makeItTwoDigits(Month(dt)) & "\" & makeItTwoDigits(Day(dt)) & "\" & fileName
 
     CreateInventoryCsvPath = fullPath
