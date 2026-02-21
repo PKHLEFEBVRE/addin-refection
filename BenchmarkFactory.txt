@@ -66,8 +66,6 @@ Private Sub PruneSmallPositions(bench As Portfolio, totalAUM As Double, threshol
     Dim smallestPos As Position
     Dim removedAmount As Double
     Dim totalWeight As Double
-    Dim adjustmentFactor As Double
-    Dim i As Long
     Dim continuePruning As Boolean
 
     Do
@@ -94,15 +92,9 @@ Private Sub PruneSmallPositions(bench As Portfolio, totalAUM As Double, threshol
                 Next pos
 
                 If totalWeight > 0 Then
-                    adjustmentFactor = 1 + (smallestPos.weight / totalWeight)
-                    ' Actually, strictly speaking, we want the new sum of weights to be 1 (or original total).
-                    ' If we removed weight W_rem, new total is 1 - W_rem.
-                    ' We want to scale remaining weights W_i to W_i' such that sum(W_i') = 1.
-                    ' Factor = 1 / (1 - W_rem) approx. Or simply:
-                    ' NewWeight = OldWeight / SumOldWeights (of remaining).
-
+                    ' Re-normalize to 100% of previous total (effectively distributing removed weight)
                     For Each pos In bench.positions.Items
-                        pos.weight = pos.weight / totalWeight ' Re-normalize to 100% of previous total (effectively distributing removed weight)
+                        pos.weight = pos.weight / totalWeight
                     Next pos
                 End If
 

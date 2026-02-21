@@ -24,10 +24,14 @@ Public AUM As Double
 Public exposureLimits As Dictionary
 Public positions As Dictionary
 
+Private m_equityDelta As Double
+Private m_equityDeltaComputed As Boolean
+
 Private Sub Class_Initialize()
 
     Set exposureLimits = New Dictionary
     Set positions = New Dictionary
+    m_equityDeltaComputed = False
 
 End Sub
 
@@ -41,6 +45,38 @@ Public Function GetPositions(dt As Date) As Dictionary
         Set positions = Data.GetInventory(dt, inventoryId)
     End If
 
+    ' Reset computed values when positions change (if GetPositions is called)
+    m_equityDeltaComputed = False
+
     Set GetPositions = positions
+
+End Function
+
+Public Function GetComputedEquityDelta() As Double
+
+    If m_equityDeltaComputed Then
+        GetComputedEquityDelta = m_equityDelta
+        Exit Function
+    End If
+
+    Dim sumDelta As Double
+    Dim pos As Variant
+    Dim currentPos As Position
+
+    sumDelta = 0
+
+    If Not positions Is Nothing Then
+        For Each pos In positions.Items
+            Set currentPos = pos
+            If Not currentPos.posInstrument Is Nothing Then
+                sumDelta = sumDelta + (currentPos.weight * currentPos.posInstrument.equityDelta)
+            End If
+        Next pos
+    End If
+
+    m_equityDelta = sumDelta
+    m_equityDeltaComputed = True
+
+    GetComputedEquityDelta = m_equityDelta
 
 End Function
