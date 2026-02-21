@@ -1,6 +1,8 @@
 Option Explicit
 
-Public Function ComputeBenchmark(targetPortfolio As Portfolio) As Portfolio
+Private Const MONEY_MARKET_ID As String = "MM_FUND_PLACEHOLDER" ' TODO: Update with actual Money Market ID
+
+Public Function ComputeBenchmark(targetPortfolio As Portfolio, Optional applyTimeAdjustment As Boolean = False) As Portfolio
 
     Dim benchmark As New Portfolio
     benchmark.Name = "Benchmark for " & targetPortfolio.Name
@@ -47,15 +49,70 @@ Public Function ComputeBenchmark(targetPortfolio As Portfolio) As Portfolio
         End If
     Next bucketName
 
-    ' 5. Apply Minimum Quantity Threshold (Iterative Pruning)
+    ' 5. Apply Time Adjustment (Optional)
+    If applyTimeAdjustment Then
+        ApplyTimeAdjustment benchmark, targetPortfolio
+    End If
+
+    ' 6. Apply Minimum Quantity Threshold (Iterative Pruning)
     PruneSmallPositions benchmark, targetPortfolio.AUM, 5000 ' Threshold example 5000
 
-    ' 6. Final Quantity Calculation
+    ' 7. Final Quantity Calculation
     CalculateQuantities benchmark, targetPortfolio.AUM
 
     Set ComputeBenchmark = benchmark
 
 End Function
+
+Private Sub ApplyTimeAdjustment(bench As Portfolio, targetPortfolio As Portfolio)
+    Dim creationDate As Date
+    Dim yearsExist As Double
+    Dim timeFactor As Double
+    Dim pos As Position
+    Dim mmPos As New Position
+    Dim mmWeight As Double
+
+    creationDate = targetPortfolio.creationDate
+
+    If creationDate = 0 Then
+        Err.Raise vbObjectError + 1, "BenchmarkFactory.ComputeBenchmark", "Creation date is missing for portfolio " & targetPortfolio.Name & ". Cannot apply time adjustment."
+    End If
+
+    yearsExist = (Date - creationDate) / 365
+
+    If yearsExist >= 1 Then
+        timeFactor = 1
+    ElseIf yearsExist < 0 Then
+        timeFactor = 0 ' Handle future creation dates gracefully
+    Else
+        timeFactor = yearsExist
+    End If
+
+    ' Scale existing positions
+    For Each pos In bench.positions.Items
+        pos.weight = pos.weight * timeFactor
+    Next pos
+
+    ' Calculate Money Market weight
+    mmWeight = 1 - timeFactor
+
+    If mmWeight > 0 Then
+        mmPos.posID = MONEY_MARKET_ID
+        mmPos.weight = mmWeight
+        ' Attempt to hydrate instrument details if available (might fail if placeholder)
+        On Error Resume Next
+        Dim instrDict As Dictionary
+        Set instrDict = Data.GetInstruments(Date, True)
+        If Not instrDict Is Nothing Then
+            If instrDict.Exists(MONEY_MARKET_ID) Then
+                Set mmPos.posInstrument = instrDict(MONEY_MARKET_ID)
+            End If
+        End If
+        On Error GoTo 0
+
+        AddPositionToBenchmark bench, mmPos
+    End If
+End Sub
 
 Private Sub PruneSmallPositions(bench As Portfolio, totalAUM As Double, threshold As Double)
     ' Iteratively remove smallest position below threshold and redistribute amount proportionally
