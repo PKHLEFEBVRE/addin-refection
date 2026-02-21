@@ -22,7 +22,7 @@ Public Function ComputeBenchmark(targetPortfolio As Portfolio) As Portfolio
     Dim interpolatedBuckets As Dictionary
     Set interpolatedBuckets = InterpolateModels(defensiveModel, aggressiveModel, equityDelta)
 
-    ' 4. Construct Benchmark Portfolio
+    ' 4. Construct Benchmark Portfolio (Initial Pass)
     Dim bucketName As Variant
     Dim bucketPort As Portfolio
     Dim bucketWeight As Double
@@ -47,9 +47,140 @@ Public Function ComputeBenchmark(targetPortfolio As Portfolio) As Portfolio
         End If
     Next bucketName
 
+    ' 5. Apply Minimum Quantity Threshold (Iterative Pruning)
+    PruneSmallPositions benchmark, targetPortfolio.AUM, 5000 ' Threshold example 5000
+
+    ' 6. Final Quantity Calculation
+    CalculateQuantities benchmark, targetPortfolio.AUM
+
     Set ComputeBenchmark = benchmark
 
 End Function
+
+Private Sub PruneSmallPositions(bench As Portfolio, totalAUM As Double, threshold As Double)
+    ' Iteratively remove smallest position below threshold and redistribute amount proportionally
+    ' to remaining positions. Repeat until all positions satisfy threshold.
+
+    Dim sortedPositions As Collection
+    Dim pos As Position
+    Dim smallestPos As Position
+    Dim removedAmount As Double
+    Dim totalWeight As Double
+    Dim adjustmentFactor As Double
+    Dim i As Long
+    Dim continuePruning As Boolean
+
+    Do
+        continuePruning = False
+        Set sortedPositions = SortPositionsByAmount(bench.positions, totalAUM)
+
+        If sortedPositions.Count > 0 Then
+            Set smallestPos = sortedPositions(1)
+
+            ' Calculate amount (weight * AUM)
+            Dim amount As Double
+            amount = smallestPos.weight * totalAUM
+
+            If amount < threshold And amount > 0 Then
+                ' Remove position
+                bench.positions.Remove smallestPos.posID
+                removedAmount = amount
+
+                ' Redistribute proportionally
+                ' Calculate total remaining weight
+                totalWeight = 0
+                For Each pos In bench.positions.Items
+                    totalWeight = totalWeight + pos.weight
+                Next pos
+
+                If totalWeight > 0 Then
+                    adjustmentFactor = 1 + (smallestPos.weight / totalWeight)
+                    ' Actually, strictly speaking, we want the new sum of weights to be 1 (or original total).
+                    ' If we removed weight W_rem, new total is 1 - W_rem.
+                    ' We want to scale remaining weights W_i to W_i' such that sum(W_i') = 1.
+                    ' Factor = 1 / (1 - W_rem) approx. Or simply:
+                    ' NewWeight = OldWeight / SumOldWeights (of remaining).
+
+                    For Each pos In bench.positions.Items
+                        pos.weight = pos.weight / totalWeight ' Re-normalize to 100% of previous total (effectively distributing removed weight)
+                    Next pos
+                End If
+
+                continuePruning = True
+            End If
+        End If
+    Loop While continuePruning And bench.positions.Count > 0
+
+End Sub
+
+Private Function SortPositionsByAmount(positions As Dictionary, totalAUM As Double) As Collection
+    ' Returns a collection of Position objects sorted by amount (ascending)
+    ' Bubble sort for simplicity given expected portfolio size < 1000
+
+    Dim coll As New Collection
+    Dim pos As Position
+    Dim arr() As Position
+    Dim i As Long, j As Long
+    Dim temp As Position
+
+    If positions.Count = 0 Then
+        Set SortPositionsByAmount = coll
+        Exit Function
+    End If
+
+    ReDim arr(1 To positions.Count)
+    i = 1
+    For Each pos In positions.Items
+        Set arr(i) = pos
+        i = i + 1
+    Next pos
+
+    ' Sort
+    For i = 1 To UBound(arr) - 1
+        For j = i + 1 To UBound(arr)
+            If (arr(i).weight * totalAUM) > (arr(j).weight * totalAUM) Then
+                Set temp = arr(i)
+                Set arr(i) = arr(j)
+                Set arr(j) = temp
+            End If
+        Next j
+    Next i
+
+    ' Populate collection
+    For i = 1 To UBound(arr)
+        coll.Add arr(i)
+    Next i
+
+    Set SortPositionsByAmount = coll
+End Function
+
+Private Sub CalculateQuantities(bench As Portfolio, totalAUM As Double)
+    Dim pos As Position
+    Dim price As Double
+
+    For Each pos In bench.positions.Items
+        ' Amount in Base Currency
+        pos.amountBaseCur = pos.weight * totalAUM
+
+        ' Price retrieval (Try instrument lastClose first, then pos.price)
+        price = 0
+        If Not pos.posInstrument Is Nothing Then
+            price = pos.posInstrument.lastClose
+        End If
+
+        If price = 0 Then price = pos.price
+
+        ' Calculate Qty
+        If price <> 0 Then
+            pos.qty = pos.amountBaseCur / price
+        Else
+            pos.qty = 0 ' Cannot calculate qty without price
+        End If
+
+        ' Update pos.price to reflect used price
+        pos.price = price
+    Next pos
+End Sub
 
 Private Function GetEquityDelta(port As Portfolio) As Double
     ' Equity Delta is provided via EnrichedPortfoliosFromDashboard (external process)
