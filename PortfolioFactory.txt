@@ -180,3 +180,119 @@ Public Static Function CreateDiffPortfolio(port As Portfolio, bench As Portfolio
     Set CreateDiffPortfolio = diffPort
 
 End Function
+
+Public Sub EnrichPortfoliosFromDashboard(portfolios As Dictionary, ws As Worksheet)
+
+    Dim data As Variant
+    data = ws.UsedRange.Value
+
+    If Not IsArray(data) Then Exit Sub
+
+    Dim r As Long, c As Long
+    Dim headers As Dictionary
+    Set headers = New Dictionary
+
+    ' Parse Headers (Row 1)
+    For c = 1 To UBound(data, 2)
+        If Not IsError(data(1, c)) Then
+            headers(CStr(data(1, c))) = c
+        End If
+    Next c
+
+    Dim key As String
+    Dim port As Portfolio
+    Dim foundPortfolios As Dictionary
+    Set foundPortfolios = New Dictionary
+
+    ' Loop Data
+    For r = 2 To UBound(data, 1)
+
+        ' Identify Portfolio (Key)
+        ' Assuming "InfinId" exists in Dashboard, else using "Account name" as proxy to InfinId or Name
+        key = ""
+        If headers.Exists("InfinId") Then
+            key = CStr(data(r, headers("InfinId")))
+        ElseIf headers.Exists("Account name") Then
+            key = CStr(data(r, headers("Account name")))
+        End If
+
+        Set port = Nothing
+
+        ' 1. Direct Lookup
+        If portfolios.Exists(key) Then
+            Set port = portfolios(key)
+        Else
+            ' 2. Fallback Scan (by Name/AccountName/InfinId)
+            Dim pKey As Variant
+            For Each pKey In portfolios
+                If LCase(portfolios(pKey).InfinId) = LCase(key) Or _
+                   LCase(portfolios(pKey).accountName) = LCase(key) Or _
+                   LCase(portfolios(pKey).Name) = LCase(key) Then
+                    Set port = portfolios(pKey)
+                    Exit For
+                End If
+            Next pKey
+        End If
+
+        If Not port Is Nothing Then
+            ' Mark as found
+            If Not foundPortfolios.Exists(port.InfinId) Then foundPortfolios.Add port.InfinId, True
+            If Not foundPortfolios.Exists(port.Name) Then foundPortfolios.Add port.Name, True
+
+            ' Update Attributes
+            If headers.Exists("Client") Then port.client = CStr(data(r, headers("Client")))
+
+            If headers.Exists("Creation date") Then
+                If IsDate(data(r, headers("Creation date"))) Then
+                    port.creationDate = CDate(data(r, headers("Creation date")))
+                End If
+            End If
+
+            If headers.Exists("Insurer") Then port.insurer = CStr(data(r, headers("Insurer")))
+            If headers.Exists("Custodian") Then port.custodian = CStr(data(r, headers("Custodian")))
+            If headers.Exists("Sales") Then port.sales = CStr(data(r, headers("Sales")))
+
+            If headers.Exists("Account type") Then port.MandatType = CStr(data(r, headers("Account type")))
+            If headers.Exists("AV Type") Then port.AVType = CStr(data(r, headers("AV Type")))
+            If headers.Exists("CCY") Then port.ccy = CStr(data(r, headers("CCY")))
+            If headers.Exists("Profile") Then port.profile = CStr(data(r, headers("Profile")))
+            If headers.Exists("Composition") Then port.composition = CStr(data(r, headers("Composition")))
+            If headers.Exists("Target Profile") Then port.targetProfile = CStr(data(r, headers("Target Profile")))
+            If headers.Exists("Target Composition") Then port.targetComposition = CStr(data(r, headers("Target Composition")))
+        End If
+
+    Next r
+
+    ' Check for missing portfolios
+    Dim missingList As String
+    Dim p As Variant
+    Dim missingCount As Long
+
+    missingCount = 0
+    For Each p In portfolios
+        ' Check if the portfolio (by InfinId or Name) was found in the dashboard
+        ' portfolios dict key is likely InfinId or Name
+        ' We check if the object itself was processed (using its unique IDs)
+        Dim pObj As Portfolio
+        Set pObj = portfolios(p)
+
+        ' Check either InfinId or Name in the found set
+        Dim wasFound As Boolean
+        wasFound = False
+        If foundPortfolios.Exists(pObj.InfinId) Then wasFound = True
+        If foundPortfolios.Exists(pObj.Name) Then wasFound = True
+
+        If Not wasFound Then
+            missingList = missingList & vbCrLf & "- " & pObj.Name & " (" & pObj.InfinId & ")"
+            missingCount = missingCount + 1
+        End If
+    Next p
+
+    If missingCount > 0 Then
+        MsgBox "CRITICAL ERROR: The following portfolios are missing from the Dashboard sheet." & vbCrLf & _
+               "Please update the dashboard and retry." & vbCrLf & vbCrLf & _
+               missingList, vbCritical, "Dashboard Sync Error"
+        Err.Raise vbObjectError + 500, "EnrichPortfoliosFromDashboard", "Portfolios missing from Dashboard sheet."
+    End If
+
+End Sub
