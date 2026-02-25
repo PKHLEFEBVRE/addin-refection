@@ -23,11 +23,13 @@ Public CashAndTreso As Double
 Public AUM As Double
 Public exposureLimits As Dictionary
 Public positions As Dictionary
+Public trades As Dictionary
 
 Private Sub Class_Initialize()
 
     Set exposureLimits = New Dictionary
     Set positions = New Dictionary
+    Set trades = New Dictionary
 
 End Sub
 
@@ -70,5 +72,80 @@ Public Function GetPositions(dt As Date) As Dictionary
     End If
 
     Set GetPositions = positions
+
+End Function
+
+Public Sub SetTrades(tradesDict As Dictionary)
+    If Not tradesDict Is Nothing Then
+        Set trades = tradesDict
+    End If
+End Sub
+
+Public Function GetPositionsWithTrades() As Dictionary
+
+    Dim simPositions As Dictionary
+    Set simPositions = New Dictionary
+
+    Dim key As Variant
+    Dim pos As Position, newPos As Position
+    Dim trade As Position
+    Dim totalTradeCost As Double
+
+    ' 1. Clone original positions
+    For Each key In positions
+        Set pos = positions(key)
+        Set newPos = pos.Clone()
+        simPositions.Add newPos.posID, newPos
+    Next key
+
+    ' 2. Calculate trade cost (excluding Cash "10")
+    totalTradeCost = 0
+    For Each key In trades
+        Set trade = trades(key)
+        If trade.posID <> "10" Then
+            totalTradeCost = totalTradeCost + trade.amountBaseCur
+        End If
+    Next key
+
+    ' 3. Apply trades
+    For Each key In trades
+        Set trade = trades(key)
+
+        If simPositions.Exists(trade.posID) Then
+            Set newPos = simPositions(trade.posID)
+            newPos.qty = newPos.qty + trade.qty
+            newPos.amountBaseCur = newPos.amountBaseCur + trade.amountBaseCur
+        Else
+            Set newPos = trade.Clone()
+            simPositions.Add newPos.posID, newPos
+        End If
+    Next key
+
+    ' 4. Automatic Financing (Subtract cost from Cash "10")
+    If simPositions.Exists("10") Then
+        Set newPos = simPositions("10")
+        newPos.amountBaseCur = newPos.amountBaseCur - totalTradeCost
+    Else
+        ' Should not happen based on user input, but good to handle or log
+        Debug.Print "Warning: Cash position '10' not found in portfolio " & Name
+    End If
+
+    ' 5. Recompute Weights
+    Dim simAUM As Double
+    simAUM = 0
+
+    For Each key In simPositions
+        Set newPos = simPositions(key)
+        simAUM = simAUM + newPos.amountBaseCur
+    Next key
+
+    If simAUM <> 0 Then
+        For Each key In simPositions
+            Set newPos = simPositions(key)
+            newPos.weight = newPos.amountBaseCur / simAUM
+        Next key
+    End If
+
+    Set GetPositionsWithTrades = simPositions
 
 End Function
