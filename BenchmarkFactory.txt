@@ -1,0 +1,418 @@
+Option Explicit
+
+Private Const MONEY_MARKET_ID As String = "MM_FUND_PLACEHOLDER" ' TODO: Update with actual Money Market ID
+
+Public Function ComputeBenchmark(targetPortfolio As Portfolio, Optional applyTimeAdjustment As Boolean = False) As Portfolio
+
+    Dim benchmark As New Portfolio
+    benchmark.Name = "Benchmark for " & targetPortfolio.Name
+
+    ' 1. Load Data
+    Dim buckets As Dictionary
+    Set buckets = LoadBuckets()
+
+    Dim defensiveModel As Dictionary
+    Dim aggressiveModel As Dictionary
+    Set defensiveModel = LoadModelComposition("ModelDefensive")
+    Set aggressiveModel = LoadModelComposition("ModelAggressive")
+
+    ' 2. Determine Interpolation Factor (Equity Delta)
+    Dim equityDelta As Double
+    equityDelta = GetEquityDelta(targetPortfolio)
+
+    ' 3. Interpolate Bucket Weights
+    Dim interpolatedBuckets As Dictionary
+    Set interpolatedBuckets = InterpolateModels(defensiveModel, aggressiveModel, equityDelta)
+
+    ' 4. Construct Benchmark Portfolio (Initial Pass)
+    Dim bucketName As Variant
+    Dim bucketPort As Portfolio
+    Dim bucketWeight As Double
+    Dim pos As Position
+    Dim newPos As Position
+
+    For Each bucketName In interpolatedBuckets.Keys
+        bucketWeight = interpolatedBuckets(bucketName)
+
+        If bucketWeight > 0 Then
+            If buckets.Exists(bucketName) Then
+                Set bucketPort = buckets(bucketName)
+
+                For Each pos In bucketPort.positions.Items
+                    Set newPos = pos.Clone()
+                    newPos.weight = newPos.weight * bucketWeight
+                    AddPositionToBenchmark benchmark, newPos
+                Next pos
+            Else
+                Debug.Print "Warning: Bucket '" & bucketName & "' found in model but not defined in Buckets table."
+            End If
+        End If
+    Next bucketName
+
+    ' 5. Apply Time Adjustment (Optional)
+    If applyTimeAdjustment Then
+        ApplyTimeAdjustment benchmark, targetPortfolio
+    End If
+
+    ' 6. Apply Minimum Quantity Threshold (Iterative Pruning)
+    PruneSmallPositions benchmark, targetPortfolio.AUM, 5000 ' Threshold example 5000
+
+    ' 7. Final Quantity Calculation
+    CalculateQuantities benchmark, targetPortfolio.AUM
+
+    Set ComputeBenchmark = benchmark
+
+End Function
+
+Private Sub ApplyTimeAdjustment(bench As Portfolio, targetPortfolio As Portfolio)
+    Dim creationDate As Date
+    Dim yearsExist As Double
+    Dim timeFactor As Double
+    Dim pos As Position
+    Dim mmPos As New Position
+    Dim mmWeight As Double
+
+    creationDate = targetPortfolio.creationDate
+
+    If creationDate = 0 Then
+        Err.Raise vbObjectError + 1, "BenchmarkFactory.ComputeBenchmark", "Creation date is missing for portfolio " & targetPortfolio.Name & ". Cannot apply time adjustment."
+    End If
+
+    yearsExist = (Date - creationDate) / 365
+
+    If yearsExist >= 1 Then
+        timeFactor = 1
+    ElseIf yearsExist < 0 Then
+        timeFactor = 0 ' Handle future creation dates gracefully
+    Else
+        timeFactor = yearsExist
+    End If
+
+    ' Scale existing positions
+    For Each pos In bench.positions.Items
+        pos.weight = pos.weight * timeFactor
+    Next pos
+
+    ' Calculate Money Market weight
+    mmWeight = 1 - timeFactor
+
+    If mmWeight > 0 Then
+        mmPos.posID = MONEY_MARKET_ID
+        mmPos.weight = mmWeight
+        ' Attempt to hydrate instrument details if available (might fail if placeholder)
+        On Error Resume Next
+        Dim instrDict As Dictionary
+        Set instrDict = Data.GetInstruments(Date, True)
+        If Not instrDict Is Nothing Then
+            If instrDict.Exists(MONEY_MARKET_ID) Then
+                Set mmPos.posInstrument = instrDict(MONEY_MARKET_ID)
+            End If
+        End If
+        On Error GoTo 0
+
+        AddPositionToBenchmark bench, mmPos
+    End If
+End Sub
+
+Private Sub PruneSmallPositions(bench As Portfolio, totalAUM As Double, threshold As Double)
+    ' Iteratively remove smallest position below threshold and redistribute amount proportionally
+    ' to remaining positions. Repeat until all positions satisfy threshold.
+
+    Dim sortedPositions As Collection
+    Dim pos As Position
+    Dim smallestPos As Position
+    Dim removedAmount As Double
+    Dim totalWeight As Double
+    Dim continuePruning As Boolean
+
+    Do
+        continuePruning = False
+        Set sortedPositions = SortPositionsByAmount(bench.positions, totalAUM)
+
+        If sortedPositions.Count > 0 Then
+            Set smallestPos = sortedPositions(1)
+
+            ' Calculate amount (weight * AUM)
+            Dim amount As Double
+            amount = smallestPos.weight * totalAUM
+
+            If amount < threshold And amount > 0 Then
+                ' Remove position
+                bench.positions.Remove smallestPos.posID
+                removedAmount = amount
+
+                ' Redistribute proportionally
+                ' Calculate total remaining weight
+                totalWeight = 0
+                For Each pos In bench.positions.Items
+                    totalWeight = totalWeight + pos.weight
+                Next pos
+
+                If totalWeight > 0 Then
+                    ' Re-normalize to 100% of previous total (effectively distributing removed weight)
+                    For Each pos In bench.positions.Items
+                        pos.weight = pos.weight / totalWeight
+                    Next pos
+                End If
+
+                continuePruning = True
+            End If
+        End If
+    Loop While continuePruning And bench.positions.Count > 0
+
+End Sub
+
+Private Function SortPositionsByAmount(positions As Dictionary, totalAUM As Double) As Collection
+    ' Returns a collection of Position objects sorted by amount (ascending)
+    ' Bubble sort for simplicity given expected portfolio size < 1000
+
+    Dim coll As New Collection
+    Dim pos As Position
+    Dim arr() As Position
+    Dim i As Long, j As Long
+    Dim temp As Position
+
+    If positions.Count = 0 Then
+        Set SortPositionsByAmount = coll
+        Exit Function
+    End If
+
+    ReDim arr(1 To positions.Count)
+    i = 1
+    For Each pos In positions.Items
+        Set arr(i) = pos
+        i = i + 1
+    Next pos
+
+    ' Sort
+    For i = 1 To UBound(arr) - 1
+        For j = i + 1 To UBound(arr)
+            If (arr(i).weight * totalAUM) > (arr(j).weight * totalAUM) Then
+                Set temp = arr(i)
+                Set arr(i) = arr(j)
+                Set arr(j) = temp
+            End If
+        Next j
+    Next i
+
+    ' Populate collection
+    For i = 1 To UBound(arr)
+        coll.Add arr(i)
+    Next i
+
+    Set SortPositionsByAmount = coll
+End Function
+
+Private Sub CalculateQuantities(bench As Portfolio, totalAUM As Double)
+    Dim pos As Position
+    Dim price As Double
+
+    For Each pos In bench.positions.Items
+        ' Amount in Base Currency
+        pos.amountBaseCur = pos.weight * totalAUM
+
+        ' Price retrieval (Try instrument lastClose first, then pos.price)
+        price = 0
+        If Not pos.posInstrument Is Nothing Then
+            price = pos.posInstrument.lastClose
+        End If
+
+        If price = 0 Then price = pos.price
+
+        ' Calculate Qty
+        If price <> 0 Then
+            pos.qty = pos.amountBaseCur / price
+        Else
+            pos.qty = 0 ' Cannot calculate qty without price
+        End If
+
+        ' Update pos.price to reflect used price
+        pos.price = price
+    Next pos
+End Sub
+
+Private Function GetEquityDelta(port As Portfolio) As Double
+    ' Equity Delta is provided via EnrichedPortfoliosFromDashboard (external process)
+    ' and stored in the exposureLimits dictionary under "EquityDelta".
+
+    Dim delta As Double
+    Dim found As Boolean
+    found = False
+
+    If Not port.exposureLimits Is Nothing Then
+        If port.exposureLimits.Exists("EquityDelta") Then
+            delta = CDbl(port.exposureLimits("EquityDelta"))
+            found = True
+        End If
+    End If
+
+    If Not found Then
+        ' Fallback to port.profile if no enriched data available
+        On Error Resume Next
+        delta = CDbl(port.profile)
+        If Err.Number = 0 Then found = True
+        On Error GoTo 0
+    End If
+
+    If Not found Then
+        Debug.Print "Warning: Could not determine Equity Delta for " & port.Name & ". Defaulting to 0."
+        delta = 0
+    End If
+
+    ' Ensure range 0-1
+    If delta > 1 Then delta = delta / 100
+
+    GetEquityDelta = delta
+End Function
+
+Private Function LoadBuckets() As Dictionary
+    Dim dict As New Dictionary
+    Dim rng As Range
+    Dim r As Long
+
+    On Error Resume Next
+    Set rng = ThisWorkbook.Names("BucketsData").RefersToRange
+    On Error GoTo 0
+
+    If rng Is Nothing Then
+        Debug.Print "Error: Named range 'BucketsData' not found."
+        Set LoadBuckets = dict
+        Exit Function
+    End If
+
+    ' Assuming range columns: BucketName, InstrumentID, InstrumentName, Weight
+
+    Dim bucketName As String
+    Dim instrId As String
+    Dim weight As Double
+    Dim port As Portfolio
+    Dim pos As Position
+    Dim instrDict As Dictionary
+
+    ' Try to get instrument details if available for the current date
+    On Error Resume Next
+    Set instrDict = Data.GetInstruments(Date, True)
+    On Error GoTo 0
+
+    For r = 1 To rng.Rows.Count
+        bucketName = rng.Cells(r, 1).Value
+        instrId = rng.Cells(r, 2).Value
+        ' Name is in column 3, skipping
+
+        If bucketName <> "" Then
+            ' Parse weight safely
+            On Error Resume Next
+            weight = CDbl(rng.Cells(r, 4).Value)
+            If Err.Number <> 0 Then
+                ' Reset weight if parsing failed (e.g. header row)
+                weight = 0
+                bucketName = "" ' Skip processing this row
+            End If
+            On Error GoTo 0
+
+            If bucketName <> "" Then
+                If Not dict.Exists(bucketName) Then
+                    Set port = New Portfolio
+                    port.Name = bucketName
+                    dict.Add bucketName, port
+                Else
+                    Set port = dict(bucketName)
+                End If
+
+                Set pos = New Position
+                pos.posID = instrId
+                pos.weight = weight
+
+                If Not instrDict Is Nothing Then
+                    If instrDict.Exists(instrId) Then
+                        Set pos.posInstrument = instrDict(instrId)
+                    End If
+                End If
+
+                port.positions.Add pos.posID, pos
+            End If
+        End If
+    Next r
+
+    Set LoadBuckets = dict
+End Function
+
+Private Function LoadModelComposition(rangeName As String) As Dictionary
+    Dim dict As New Dictionary
+    Dim rng As Range
+    Dim r As Long
+
+    On Error Resume Next
+    Set rng = ThisWorkbook.Names(rangeName).RefersToRange
+    On Error GoTo 0
+
+    If rng Is Nothing Then
+        Debug.Print "Error: Named range '" & rangeName & "' not found."
+        Set LoadModelComposition = dict
+        Exit Function
+    End If
+
+    ' Assuming range columns: BucketName, Weight (2 columns)
+
+    Dim bucketName As String
+    Dim weight As Double
+
+    For r = 1 To rng.Rows.Count
+        bucketName = rng.Cells(r, 1).Value
+
+        If bucketName <> "" Then
+            On Error Resume Next
+            weight = CDbl(rng.Cells(r, 2).Value)
+            If Err.Number = 0 Then
+                If dict.Exists(bucketName) Then
+                    dict(bucketName) = dict(bucketName) + weight
+                Else
+                    dict.Add bucketName, weight
+                End If
+            End If
+            On Error GoTo 0
+        End If
+    Next r
+
+    Set LoadModelComposition = dict
+End Function
+
+
+Private Function InterpolateModels(defensive As Dictionary, aggressive As Dictionary, delta As Double) As Dictionary
+    Dim result As New Dictionary
+    Dim bucket As Variant
+    Dim wDef As Double
+    Dim wAgg As Double
+    Dim wFinal As Double
+
+    ' Union of keys
+    Dim allBuckets As New Dictionary
+    For Each bucket In defensive.Keys: allBuckets(bucket) = 1: Next bucket
+    For Each bucket In aggressive.Keys: allBuckets(bucket) = 1: Next bucket
+
+    For Each bucket In allBuckets.Keys
+        wDef = 0
+        If defensive.Exists(bucket) Then wDef = defensive(bucket)
+
+        wAgg = 0
+        If aggressive.Exists(bucket) Then wAgg = aggressive(bucket)
+
+        ' Linear Interpolation:
+        ' Weight = wDef + (wAgg - wDef) * Delta
+        ' Delta is 0 (Defensive) to 1 (Aggressive)
+
+        wFinal = wDef + (wAgg - wDef) * delta
+
+        If wFinal <> 0 Then result.Add bucket, wFinal
+    Next bucket
+
+    Set InterpolateModels = result
+End Function
+
+Private Sub AddPositionToBenchmark(bench As Portfolio, newPos As Position)
+    If bench.positions.Exists(newPos.posID) Then
+        bench.positions(newPos.posID).weight = bench.positions(newPos.posID).weight + newPos.weight
+    Else
+        bench.positions.Add newPos.posID, newPos
+    End If
+End Sub
