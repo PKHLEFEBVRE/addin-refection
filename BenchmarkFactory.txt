@@ -64,6 +64,38 @@ Public Function ComputeBenchmark(targetPortfolio As Portfolio, Optional applyTim
 
 End Function
 
+Public Function ComputeAggressiveModelEquityDelta() As Double
+    Dim buckets As Dictionary
+    Set buckets = LoadBuckets()
+
+    Dim aggressiveModel As Dictionary
+    Set aggressiveModel = LoadModelComposition("ModelAggressive")
+
+    Dim bucketName As Variant
+    Dim bucketPort As Portfolio
+    Dim bucketWeight As Double
+    Dim bucketDelta As Double
+    Dim totalDelta As Double
+
+    totalDelta = 0
+
+    For Each bucketName In aggressiveModel.Keys
+        bucketWeight = aggressiveModel(bucketName)
+
+        If buckets.Exists(bucketName) Then
+            Set bucketPort = buckets(bucketName)
+            ' Calculate delta for the bucket
+            bucketDelta = bucketPort.GetComputedEquityDelta()
+
+            totalDelta = totalDelta + (bucketWeight * bucketDelta)
+        Else
+            Debug.Print "Warning: Bucket '" & bucketName & "' found in Aggressive Model but not defined in Buckets table."
+        End If
+    Next bucketName
+
+    ComputeAggressiveModelEquityDelta = totalDelta
+End Function
+
 Private Sub ApplyTimeAdjustment(bench As Portfolio, targetPortfolio As Portfolio)
     Dim creationDate As Date
     Dim yearsExist As Double
