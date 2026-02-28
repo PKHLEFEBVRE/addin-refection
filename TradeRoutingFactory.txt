@@ -1,0 +1,173 @@
+Option Explicit
+
+' Modules for trade routing depending on custodian rules
+
+Public Sub RouteTrades(portfolios As Dictionary)
+
+    Dim portKey As Variant
+    Dim port As Portfolio
+    Dim tradeKey As Variant
+    Dim trade As Position
+    Dim custodian As String
+    Dim isin As String
+    Dim side As String
+    Dim absQty As Double
+
+    ' Data structures for grouping
+    ' ODDO: ISIN -> Dictionary(PortName -> Qty)
+    Dim oddoTrades As New Dictionary
+    ' SG: ISIN -> Dictionary(PortName -> Array(Side, AbsQty))
+    Dim sgTrades As New Dictionary
+
+    ' 1. Collect and group trades
+    For Each portKey In portfolios
+        Set port = portfolios(portKey)
+
+        If Not port.trades Is Nothing Then
+            If port.trades.count > 0 Then
+                custodian = UCase(Trim(port.custodian))
+
+                For Each tradeKey In port.trades
+                    Set trade = port.trades(tradeKey)
+
+                    ' Skip cash "10" for routing to brokers unless specified
+                    If trade.posID <> "10" Then
+                        isin = trade.isin
+                        If isin = "" Then isin = trade.ticker ' Fallback if ISIN missing
+
+                        If isin <> "" Then
+                            If custodian = "ODDO" Then
+                                ' ODDO Logic: Group by ISIN, then by PortName
+                                If Not oddoTrades.Exists(isin) Then
+                                    oddoTrades.Add isin, New Dictionary
+                                End If
+                                ' Aggregate quantity if multiple trades for same ISIN in same portfolio
+                                If oddoTrades(isin).Exists(port.Name) Then
+                                    oddoTrades(isin)(port.Name) = oddoTrades(isin)(port.Name) + trade.qty
+                                Else
+                                    oddoTrades(isin).Add port.Name, trade.qty
+                                End If
+
+                            ElseIf custodian = "SG" Then
+                                ' SG Logic: Group by ISIN
+                                If Not sgTrades.Exists(isin) Then
+                                    sgTrades.Add isin, New Dictionary
+                                End If
+
+                                If trade.qty > 0 Then side = "BUY" Else side = "SELL"
+                                absQty = Abs(trade.qty)
+
+                                Dim sgTradeData(1 To 2) As Variant
+                                sgTradeData(1) = side
+                                sgTradeData(2) = absQty
+
+                                ' Assuming one trade per ISIN per portfolio, otherwise we'd need a collection
+                                ' For simplicity, overwrite or add
+                                If Not sgTrades(isin).Exists(port.Name) Then
+                                    sgTrades(isin).Add port.Name, sgTradeData
+                                End If
+                            End If
+                        End If
+                    End If
+                Next tradeKey
+            End If
+        End If
+    Next portKey
+
+    ' 2. Generate Outputs
+    GenerateOddoFiles oddoTrades
+    GenerateSGEmail sgTrades
+
+End Sub
+
+Private Sub GenerateOddoFiles(oddoTrades As Dictionary)
+
+    If oddoTrades.count = 0 Then Exit Sub
+
+    Dim isin As Variant
+    Dim portName As Variant
+    Dim rowCount As Long
+    Dim dataArr() As Variant
+    Dim r As Long
+    Dim exportPath As String
+    Dim fso As Object
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    ' Use a temp folder or a specific export directory.
+    ' Defaulting to same directory as the addin/workbook for demonstration.
+    Dim baseDir As String
+    baseDir = ThisWorkbook.path & "\TradeExports"
+
+    If Not fso.FolderExists(baseDir) Then
+        fso.CreateFolder baseDir
+    End If
+
+    For Each isin In oddoTrades
+        rowCount = oddoTrades(isin).count
+        If rowCount > 0 Then
+            ReDim dataArr(1 To rowCount, 1 To 2)
+            r = 1
+            For Each portName In oddoTrades(isin)
+                dataArr(r, 1) = portName
+                dataArr(r, 2) = oddoTrades(isin)(portName)
+                r = r + 1
+            Next portName
+
+            exportPath = baseDir & "\Trade_ODDO_" & isin & ".xlsx"
+            ExcelFactory.WriteDataToExcelFile exportPath, dataArr
+            Debug.Print "Created ODDO Trade file: " & exportPath
+        End If
+    Next isin
+
+End Sub
+
+Private Sub GenerateSGEmail(sgTrades As Dictionary)
+
+    If sgTrades.count = 0 Then Exit Sub
+
+    Dim htmlBody As String
+    Dim isin As Variant
+    Dim portName As Variant
+    Dim tradeData As Variant
+
+    htmlBody = "<html><body><p>Hello,</p><p>Please execute the following trades:</p>"
+
+    For Each isin In sgTrades
+        htmlBody = htmlBody & "<h3>ISIN: " & isin & "</h3>"
+        htmlBody = htmlBody & "<table border='1' style='border-collapse: collapse;'>"
+        htmlBody = htmlBody & "<tr><th style='padding: 5px;'>Portfolio</th><th style='padding: 5px;'>Side</th><th style='padding: 5px;'>Quantity</th></tr>"
+
+        For Each portName In sgTrades(isin)
+            tradeData = sgTrades(isin)(portName)
+            htmlBody = htmlBody & "<tr>"
+            htmlBody = htmlBody & "<td style='padding: 5px;'>" & portName & "</td>"
+            htmlBody = htmlBody & "<td style='padding: 5px;'>" & tradeData(1) & "</td>"
+            htmlBody = htmlBody & "<td style='padding: 5px;'>" & Format(tradeData(2), "#,##0.00") & "</td>"
+            htmlBody = htmlBody & "</tr>"
+        Next portName
+
+        htmlBody = htmlBody & "</table><br>"
+    Next isin
+
+    htmlBody = htmlBody & "<p>Regards,<br>Trading Desk</p></body></html>"
+
+    ' Generate Email via Outlook
+    On Error Resume Next
+    Dim outApp As Object
+    Dim outMail As Object
+    Set outApp = CreateObject("Outlook.Application")
+    If outApp Is Nothing Then
+        MsgBox "Cannot open Outlook to generate SG trade email.", vbExclamation
+        Exit Sub
+    End If
+
+    Set outMail = outApp.CreateItem(0) ' olMailItem
+    With outMail
+        .To = "sg_trading@example.com" ' Placeholder
+        .Subject = "SG Trades Execution - " & Format(Date, "YYYY-MM-DD")
+        .htmlBody = htmlBody
+        .Display ' Show the draft so the user can send it
+    End With
+    On Error GoTo 0
+
+End Sub
