@@ -16,7 +16,7 @@ Public Sub RouteTrades(portfolios As Dictionary)
     ' Data structures for grouping
     ' ODDO: ISIN -> Dictionary(PortName -> Qty)
     Dim oddoTrades As New Dictionary
-    ' SG: ISIN -> Dictionary(PortName -> Array(Side, AbsQty))
+    ' SG: PortName -> Collection of Array(ISIN, Side, AbsQty)
     Dim sgTrades As New Dictionary
 
     ' 1. Collect and group trades
@@ -49,23 +49,20 @@ Public Sub RouteTrades(portfolios As Dictionary)
                                 End If
 
                             ElseIf custodian = "SG" Then
-                                ' SG Logic: Group by ISIN
-                                If Not sgTrades.Exists(isin) Then
-                                    sgTrades.Add isin, New Dictionary
+                                ' SG Logic: Group by PortName
+                                If Not sgTrades.Exists(port.Name) Then
+                                    sgTrades.Add port.Name, New Collection
                                 End If
 
                                 If trade.qty > 0 Then side = "BUY" Else side = "SELL"
                                 absQty = Abs(trade.qty)
 
-                                Dim sgTradeData(1 To 2) As Variant
-                                sgTradeData(1) = side
-                                sgTradeData(2) = absQty
+                                Dim sgTradeData(1 To 3) As Variant
+                                sgTradeData(1) = isin
+                                sgTradeData(2) = side
+                                sgTradeData(3) = absQty
 
-                                ' Assuming one trade per ISIN per portfolio, otherwise we'd need a collection
-                                ' For simplicity, overwrite or add
-                                If Not sgTrades(isin).Exists(port.Name) Then
-                                    sgTrades(isin).Add port.Name, sgTradeData
-                                End If
+                                sgTrades(port.Name).Add sgTradeData
                             End If
                         End If
                     End If
@@ -126,29 +123,36 @@ Private Sub GenerateSGEmail(sgTrades As Dictionary)
     If sgTrades.count = 0 Then Exit Sub
 
     Dim htmlBody As String
-    Dim isin As Variant
     Dim portName As Variant
     Dim tradeData As Variant
+    Dim colorIndex As Integer
+    Dim bgColor As String
+    Dim colors() As Variant
+
+    ' Define a palette of soft background colors for grouping
+    colors = Array("#e6f7ff", "#f0fff0", "#fff0f5", "#ffffe0", "#f5f5dc", "#e6e6fa")
 
     htmlBody = "<html><body><p>Hello,</p><p>Please execute the following trades:</p>"
+    htmlBody = htmlBody & "<table border='1' style='border-collapse: collapse;'>"
+    htmlBody = htmlBody & "<tr style='background-color: #d3d3d3;'><th style='padding: 5px;'>Portfolio</th><th style='padding: 5px;'>ISIN</th><th style='padding: 5px;'>Side</th><th style='padding: 5px;'>Quantity</th></tr>"
 
-    For Each isin In sgTrades
-        htmlBody = htmlBody & "<h3>ISIN: " & isin & "</h3>"
-        htmlBody = htmlBody & "<table border='1' style='border-collapse: collapse;'>"
-        htmlBody = htmlBody & "<tr><th style='padding: 5px;'>Portfolio</th><th style='padding: 5px;'>Side</th><th style='padding: 5px;'>Quantity</th></tr>"
+    colorIndex = 0
+    For Each portName In sgTrades
+        bgColor = colors(colorIndex Mod (UBound(colors) + 1))
 
-        For Each portName In sgTrades(isin)
-            tradeData = sgTrades(isin)(portName)
-            htmlBody = htmlBody & "<tr>"
+        For Each tradeData In sgTrades(portName)
+            htmlBody = htmlBody & "<tr style='background-color: " & bgColor & ";'>"
             htmlBody = htmlBody & "<td style='padding: 5px;'>" & portName & "</td>"
-            htmlBody = htmlBody & "<td style='padding: 5px;'>" & tradeData(1) & "</td>"
-            htmlBody = htmlBody & "<td style='padding: 5px;'>" & Format(tradeData(2), "#,##0.00") & "</td>"
+            htmlBody = htmlBody & "<td style='padding: 5px;'>" & tradeData(1) & "</td>" ' ISIN
+            htmlBody = htmlBody & "<td style='padding: 5px;'>" & tradeData(2) & "</td>" ' Side
+            htmlBody = htmlBody & "<td style='padding: 5px;'>" & Format(tradeData(3), "#,##0.00") & "</td>" ' Qty
             htmlBody = htmlBody & "</tr>"
-        Next portName
+        Next tradeData
 
-        htmlBody = htmlBody & "</table><br>"
-    Next isin
+        colorIndex = colorIndex + 1
+    Next portName
 
+    htmlBody = htmlBody & "</table><br>"
     htmlBody = htmlBody & "<p>Regards,<br>Trading Desk</p></body></html>"
 
     ' Generate Email via Outlook

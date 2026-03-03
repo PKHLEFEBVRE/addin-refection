@@ -89,46 +89,131 @@ Public Function GetPositionsWithTrades() As Dictionary
     Dim key As Variant
     Dim pos As Position, newPos As Position
     Dim trade As Position
-    Dim totalTradeCost As Double
+    Dim currAmount As Double
+    Dim tradeCcy As String
 
-    ' 1. Clone original positions
-    For Each key In positions
-        Set pos = positions(key)
-        Set newPos = pos.Clone()
-        simPositions.Add newPos.posID, newPos
-    Next key
+    ' Dictionary to hold costs per currency. Key = Currency Code, Value = Cost in that currency
+    Dim cashImpactByCcy As New Dictionary
 
-    ' 2. Calculate trade cost (excluding Cash "10")
-    totalTradeCost = 0
-    For Each key In trades
-        Set trade = trades(key)
-        If trade.posID <> "10" Then
-            totalTradeCost = totalTradeCost + trade.amountBaseCur
+    ' 1. Load & Clone original positions
+    ' Safety check to ensure positions are loaded
+    If positions.count = 0 Then
+        ' Can't safely determine dt here, assume already loaded or empty by design
+    End If
+
+    If Not positions Is Nothing Then
+        For Each key In positions
+            Set pos = positions(key)
+            Set newPos = pos.Clone()
+            simPositions.Add newPos.posID, newPos
+        Next key
+    End If
+
+    ' 2. Calculate trade costs per currency
+    For Each key In Me.trades
+        If Not IsEmpty(key) Then
+            Set trade = Me.trades(key)
+
+            ' Determine trade currency. If posInstrument is set, use it, else default to portfolio CCY
+            tradeCcy = ""
+            If Not trade.posInstrument Is Nothing Then
+                tradeCcy = UCase(Trim(trade.posInstrument.ccy))
+            End If
+            If tradeCcy = "" Then tradeCcy = UCase(Trim(Me.ccy))
+            If tradeCcy = "" Then tradeCcy = "EUR" ' Final fallback
+
+            If Not trade.posInstrument Is Nothing Then
+                If LCase(trade.posInstrument.category) <> "cash" Then
+                    ' Calculate cost in local currency (before FX)
+                    currAmount = trade.qty * trade.posInstrument.lastClose
+                    If trade.posInstrument.quoteInPct Then currAmount = currAmount / 100
+
+                    ' Add to the currency bucket
+                    If cashImpactByCcy.Exists(tradeCcy) Then
+                        cashImpactByCcy(tradeCcy) = cashImpactByCcy(tradeCcy) + currAmount
+                    Else
+                        cashImpactByCcy.Add tradeCcy, currAmount
+                    End If
+                End If
+            End If
         End If
     Next key
 
     ' 3. Apply trades
-    For Each key In trades
-        Set trade = trades(key)
+    For Each key In Me.trades
+        If Not IsEmpty(key) Then
+            Set trade = Me.trades(key)
+            If simPositions.Exists(trade.posID) Then
+                Set newPos = simPositions(trade.posID)
+                newPos.qty = newPos.qty + trade.qty
 
-        If simPositions.Exists(trade.posID) Then
-            Set newPos = simPositions(trade.posID)
-            newPos.qty = newPos.qty + trade.qty
-            newPos.amountBaseCur = newPos.amountBaseCur + trade.amountBaseCur
-        Else
-            Set newPos = trade.Clone()
-            simPositions.Add newPos.posID, newPos
+                ' Recalculate base currency amount
+                If Not trade.posInstrument Is Nothing Then
+                    currAmount = newPos.qty * trade.posInstrument.lastClose * trade.fx
+                    If trade.posInstrument.quoteInPct Then currAmount = currAmount / 100
+                    newPos.amountBaseCur = currAmount
+                End If
+            Else
+                Set newPos = trade.Clone()
+                simPositions.Add newPos.posID, newPos
+            End If
         End If
     Next key
 
-    ' 4. Automatic Financing (Subtract cost from Cash "10")
-    If simPositions.Exists("10") Then
-        Set newPos = simPositions("10")
-        newPos.amountBaseCur = newPos.amountBaseCur - totalTradeCost
-    Else
-        ' Should not happen based on user input, but good to handle or log
-        Debug.Print "Warning: Cash position '10' not found in portfolio " & Name
-    End If
+    ' 4. Automatic Financing (Currency specific)
+    Dim impactCcy As Variant
+    Dim cashPos As Position
+    Dim foundCash As Boolean
+    Dim costLocal As Double
+    Dim costBase As Double
+
+    For Each impactCcy In cashImpactByCcy.Keys
+        costLocal = cashImpactByCcy(impactCcy)
+        foundCash = False
+
+        ' Look for the specific cash position for this currency
+        For Each key In simPositions
+            Set cashPos = simPositions(key)
+            ' Check if it's a cash position and matches the currency
+            ' Criteria: category="cash" or posID equals currency code or posID is "10" and it's EUR
+            If UCase(Trim(cashPos.ccy)) = impactCcy Then
+                If cashPos.posID = "10" Or cashPos.posID = impactCcy Or LCase(cashPos.account) = LCase(Me.Name) Then
+                     ' Calculate the base currency equivalent of the cost
+                     costBase = costLocal * cashPos.fx
+                     cashPos.amountBaseCur = cashPos.amountBaseCur - costBase
+                     foundCash = True
+                     Exit For
+                End If
+            End If
+        Next key
+
+        ' If specific currency cash account not found, fallback to EUR/Base account ("10")
+        If Not foundCash Then
+            If simPositions.Exists("10") Then
+                Set cashPos = simPositions("10")
+                ' We need an FX rate. We don't have it explicitly here if the cash account doesn't exist.
+                ' Assuming the trade object has the correct fx relative to base.
+                ' We need to find a trade in this currency to get the FX rate
+                Dim fxRate As Double
+                fxRate = 1 ' Default
+                For Each key In Me.trades
+                    Set trade = Me.trades(key)
+                    If Not trade.posInstrument Is Nothing Then
+                        If UCase(Trim(trade.posInstrument.ccy)) = impactCcy Then
+                            fxRate = trade.fx
+                            Exit For
+                        End If
+                    End If
+                Next key
+
+                costBase = costLocal * fxRate
+                cashPos.amountBaseCur = cashPos.amountBaseCur - costBase
+                Debug.Print "Financed " & impactCcy & " trade using main cash account for portfolio " & Me.Name
+            Else
+                Debug.Print "Warning: Cash position '10' not found and could not finance " & impactCcy & " trades in portfolio " & Me.Name
+            End If
+        End If
+    Next impactCcy
 
     ' 5. Recompute Weights
     Dim simAUM As Double
