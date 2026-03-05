@@ -2,7 +2,9 @@ Option Explicit
 
 ' Generates a compliance report for a given portfolio
 ' Evaluates rules dynamically based on what is populated in port.exposureLimits
-Public Function GenerateComplianceReport(port As Portfolio) As Variant
+Public Function GenerateComplianceReport(port As Portfolio, preTrade As Boolean, Optional dt As Date = 0) As Variant
+
+    If dt = 0 Then dt = Date
 
     Dim reportRows As New Collection
     Dim headerRow(1 To 6) As Variant
@@ -30,14 +32,14 @@ Public Function GenerateComplianceReport(port As Portfolio) As Variant
 
     ' Extract appropriate positions dictionary based on trades
     Dim dictToUse As Dictionary
-    If Not port.trades Is Nothing Then
+    If preTrade And Not port.trades Is Nothing Then
         If port.trades.count > 0 Then
             Set dictToUse = port.GetPositionsWithTrades()
         Else
-            Set dictToUse = port.GetPositions(Date) ' Assuming Date if preTrade context isn't explicit here, but usually passed
+            Set dictToUse = port.GetPositions(dt)
         End If
     Else
-        Set dictToUse = port.GetPositions(Date)
+        Set dictToUse = port.GetPositions(dt)
     End If
 
     For Each ruleKey In port.exposureLimits.Keys
@@ -60,30 +62,36 @@ Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary, pre
     Dim port As Portfolio
     Dim ruleKey As Variant
 
-    ' 1. Identify all unique rules across all evaluated portfolios
-    Dim uniqueRules As New Dictionary
+    ' 0. Filter portfolios based on preTrade flag to avoid repeated checks
+    Dim filteredPortfolios As New Dictionary
     For Each pKey In portfolios
         Set port = portfolios(pKey)
-
-        ' If preTrade is True, we only care about portfolios with trades
-        Dim skipPort As Boolean
-        skipPort = False
         If preTrade Then
-            If port.trades Is Nothing Then
-                skipPort = True
-            ElseIf port.trades.count = 0 Then
-                skipPort = True
+            If Not port.trades Is Nothing Then
+                If port.trades.count > 0 Then
+                    filteredPortfolios.Add pKey, port
+                End If
             End If
+        Else
+            filteredPortfolios.Add pKey, port
         End If
+    Next pKey
 
-        If Not skipPort Then
-            If Not port.exposureLimits Is Nothing Then
-                For Each ruleKey In port.exposureLimits.Keys
-                    If Not uniqueRules.Exists(ruleKey) Then
-                        uniqueRules.Add ruleKey, ruleKey
-                    End If
-                Next ruleKey
-            End If
+    If filteredPortfolios.count = 0 Then
+        GenerateAggregatedComplianceReport = Array()
+        Exit Function
+    End If
+
+    ' 1. Identify all unique rules across all evaluated portfolios
+    Dim uniqueRules As New Dictionary
+    For Each pKey In filteredPortfolios
+        Set port = filteredPortfolios(pKey)
+        If Not port.exposureLimits Is Nothing Then
+            For Each ruleKey In port.exposureLimits.Keys
+                If Not uniqueRules.Exists(ruleKey) Then
+                    uniqueRules.Add ruleKey, ruleKey
+                End If
+            Next ruleKey
         End If
     Next pKey
 
@@ -92,25 +100,8 @@ Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary, pre
         Exit Function
     End If
 
-    ' Determine number of rows (only counting non-skipped portfolios)
-    Dim nRows As Long: nRows = 1
-    For Each pKey In portfolios
-        Set port = portfolios(pKey)
-        If preTrade Then
-            If Not port.trades Is Nothing Then
-                If port.trades.count > 0 Then nRows = nRows + 1
-            End If
-        Else
-            nRows = nRows + 1
-        End If
-    Next pKey
-
-    If nRows = 1 Then ' Only header
-        GenerateAggregatedComplianceReport = Array()
-        Exit Function
-    End If
-
     ' 2. Initialize Report Array
+    Dim nRows As Long: nRows = filteredPortfolios.count + 1
     Dim nCols As Long: nCols = 1 + (uniqueRules.count * 3)
     Dim report() As Variant
     ReDim report(1 To nRows, 1 To nCols)
@@ -135,59 +126,46 @@ Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary, pre
     Dim limitBreach As Double
     Dim dictToUse As Dictionary
 
-    For Each pKey In portfolios
-        Set port = portfolios(pKey)
+    For Each pKey In filteredPortfolios
+        Set port = filteredPortfolios(pKey)
+        report(r, 1) = port.Name
 
-        Dim skipPort2 As Boolean
-        skipPort2 = False
+        ' Determine which dictionary to use (we already know trades > 0 if preTrade is True)
         If preTrade Then
-            If port.trades Is Nothing Then
-                skipPort2 = True
-            ElseIf port.trades.count = 0 Then
-                skipPort2 = True
-            End If
+            Set dictToUse = port.GetPositionsWithTrades()
+        Else
+            Set dictToUse = port.GetPositions(dt)
         End If
 
-        If Not skipPort2 Then
-            report(r, 1) = port.Name
+        For Each rKey In uniqueRules.Keys
+            c = colMap(rKey)
 
-            ' Determine which dictionary to use
-            If preTrade And port.trades.count > 0 Then
-                Set dictToUse = port.GetPositionsWithTrades()
-            Else
-                Set dictToUse = port.GetPositions(dt)
-            End If
+            If Not port.exposureLimits Is Nothing Then
+                If port.exposureLimits.Exists(rKey) Then
+                    limitBreach = port.exposureLimits(rKey)
+                    res = EvaluateSingleRule(port, dictToUse, CStr(rKey), limitBreach)
 
-            For Each rKey In uniqueRules.Keys
-                c = colMap(rKey)
-
-                If Not port.exposureLimits Is Nothing Then
-                    If port.exposureLimits.Exists(rKey) Then
-                        limitBreach = port.exposureLimits(rKey)
-                        res = EvaluateSingleRule(port, dictToUse, CStr(rKey), limitBreach)
-
-                        If Not IsEmpty(res) Then
-                            report(r, c) = res(2)     ' Exposure
-                            report(r, c + 1) = res(4) ' Breach Limit
-                            report(r, c + 2) = res(5) ' Status
-                        Else
-                            report(r, c) = "Err"
-                            report(r, c + 1) = "Err"
-                            report(r, c + 2) = "Err"
-                        End If
+                    If Not IsEmpty(res) Then
+                        report(r, c) = res(2)     ' Exposure
+                        report(r, c + 1) = res(4) ' Breach Limit
+                        report(r, c + 2) = res(5) ' Status
                     Else
-                        report(r, c) = "N/A"
-                        report(r, c + 1) = "N/A"
-                        report(r, c + 2) = "N/A"
+                        report(r, c) = "Err"
+                        report(r, c + 1) = "Err"
+                        report(r, c + 2) = "Err"
                     End If
                 Else
                     report(r, c) = "N/A"
                     report(r, c + 1) = "N/A"
                     report(r, c + 2) = "N/A"
                 End If
-            Next rKey
-            r = r + 1
-        End If
+            Else
+                report(r, c) = "N/A"
+                report(r, c + 1) = "N/A"
+                report(r, c + 2) = "N/A"
+            End If
+        Next rKey
+        r = r + 1
     Next pKey
 
     GenerateAggregatedComplianceReport = report
