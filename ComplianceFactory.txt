@@ -16,13 +16,9 @@ Public Function GenerateComplianceReport(port As Portfolio) As Variant
     headerRow(6) = "Status"
     reportRows.Add headerRow
 
-    Dim exp As Double
-    Dim limitBreach As Double
-    Dim res As Variant
     Dim ruleKey As Variant
-    Dim rowData(1 To 6) As Variant
+    Dim res As Variant
 
-    ' If no limits defined, return just the headers
     If port.exposureLimits Is Nothing Then
         GenerateComplianceReport = CollectionTo2DArray(reportRows)
         Exit Function
@@ -32,56 +28,156 @@ Public Function GenerateComplianceReport(port As Portfolio) As Variant
         Exit Function
     End If
 
-    ' Cache some calculations that might be used by multiple rules
-    Dim deltaEquity As Double: deltaEquity = -999
-    Dim bondsExp As Double: bondsExp = -999
-
     For Each ruleKey In port.exposureLimits.Keys
-        limitBreach = port.exposureLimits(ruleKey)
-
-        Select Case UCase(Trim(ruleKey))
-            Case "DELTAEQUITY_MIN"
-                If deltaEquity = -999 Then deltaEquity = port.GetEquityDelta()
-                res = EvaluateThreshold(deltaEquity, limitBreach, "MIN")
-                reportRows.Add CreateRow("Delta Equity Minimum", "MIN", deltaEquity, res(0), limitBreach, res(1))
-
-            Case "DELTAEQUITY_MAX"
-                If deltaEquity = -999 Then deltaEquity = port.GetEquityDelta()
-                res = EvaluateThreshold(deltaEquity, limitBreach, "MAX")
-                reportRows.Add CreateRow("Delta Equity Maximum", "MAX", deltaEquity, res(0), limitBreach, res(1))
-
-            Case "BONDS_MIN"
-                If bondsExp = -999 Then bondsExp = Calc_Bonds(port)
-                res = EvaluateThreshold(bondsExp, limitBreach, "MIN")
-                reportRows.Add CreateRow("Bonds Minimum", "MIN", bondsExp, res(0), limitBreach, res(1))
-
-            Case "BONDS_MAX"
-                If bondsExp = -999 Then bondsExp = Calc_Bonds(port)
-                res = EvaluateThreshold(bondsExp, limitBreach, "MAX")
-                reportRows.Add CreateRow("Bonds Maximum", "MAX", bondsExp, res(0), limitBreach, res(1))
-
-            Case "ALTERNATIVE_MAX"
-                exp = Calc_Alternative(port)
-                res = EvaluateThreshold(exp, limitBreach, "MAX")
-                reportRows.Add CreateRow("Alternative Maximum", "MAX", exp, res(0), limitBreach, res(1))
-
-            Case "RISKOFF_MIN"
-                exp = Calc_RiskOff(port)
-                res = EvaluateThreshold(exp, limitBreach, "MIN")
-                reportRows.Add CreateRow("Risk Off Minimum", "MIN", exp, res(0), limitBreach, res(1))
-
-            Case "STRUCTURED_MAX"
-                exp = Calc_StructuredProducts(port)
-                res = EvaluateThreshold(exp, limitBreach, "MAX")
-                reportRows.Add CreateRow("Structured Products Maximum", "MAX", exp, res(0), limitBreach, res(1))
-
-            ' You can easily add more cases here for new rules
-        End Select
+        res = EvaluateSingleRule(port, CStr(ruleKey), port.exposureLimits(ruleKey))
+        If Not IsEmpty(res) Then
+            reportRows.Add CreateRow(res(0), res(1), res(2), res(3), res(4), res(5))
+        End If
     Next ruleKey
 
     GenerateComplianceReport = CollectionTo2DArray(reportRows)
 
 End Function
+
+' Generates a consolidated matrix report for all portfolios
+Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary) As Variant
+
+    Dim pKey As Variant
+    Dim port As Portfolio
+    Dim ruleKey As Variant
+
+    ' 1. Identify all unique rules across all portfolios
+    Dim uniqueRules As New Dictionary
+    For Each pKey In portfolios
+        Set port = portfolios(pKey)
+        If Not port.exposureLimits Is Nothing Then
+            For Each ruleKey In port.exposureLimits.Keys
+                If Not uniqueRules.Exists(ruleKey) Then
+                    uniqueRules.Add ruleKey, ruleKey
+                End If
+            Next ruleKey
+        End If
+    Next pKey
+
+    If uniqueRules.count = 0 Then
+        GenerateAggregatedComplianceReport = Array()
+        Exit Function
+    End If
+
+    ' 2. Initialize Report Array
+    Dim nRows As Long: nRows = portfolios.count + 1
+    Dim nCols As Long: nCols = 1 + (uniqueRules.count * 3)
+    Dim report() As Variant
+    ReDim report(1 To nRows, 1 To nCols)
+
+    ' Build Headers
+    report(1, 1) = "Fund Name"
+    Dim c As Long: c = 2
+    Dim rKey As Variant
+    Dim colMap As New Dictionary ' ruleKey -> Start Column Index
+
+    For Each rKey In uniqueRules.Keys
+        report(1, c) = rKey & " Exp"
+        report(1, c + 1) = rKey & " Limit"
+        report(1, c + 2) = rKey & " Status"
+        colMap.Add rKey, c
+        c = c + 3
+    Next rKey
+
+    ' 3. Populate Data
+    Dim r As Long: r = 2
+    Dim res As Variant
+    Dim limitBreach As Double
+
+    For Each pKey In portfolios
+        Set port = portfolios(pKey)
+        report(r, 1) = port.Name
+
+        For Each rKey In uniqueRules.Keys
+            c = colMap(rKey)
+
+            If Not port.exposureLimits Is Nothing Then
+                If port.exposureLimits.Exists(rKey) Then
+                    limitBreach = port.exposureLimits(rKey)
+                    res = EvaluateSingleRule(port, CStr(rKey), limitBreach)
+
+                    If Not IsEmpty(res) Then
+                        report(r, c) = res(2)     ' Exposure
+                        report(r, c + 1) = res(4) ' Breach Limit
+                        report(r, c + 2) = res(5) ' Status
+                    Else
+                        report(r, c) = "Err"
+                        report(r, c + 1) = "Err"
+                        report(r, c + 2) = "Err"
+                    End If
+                Else
+                    report(r, c) = "N/A"
+                    report(r, c + 1) = "N/A"
+                    report(r, c + 2) = "N/A"
+                End If
+            Else
+                report(r, c) = "N/A"
+                report(r, c + 1) = "N/A"
+                report(r, c + 2) = "N/A"
+            End If
+        Next rKey
+        r = r + 1
+    Next pKey
+
+    GenerateAggregatedComplianceReport = report
+End Function
+
+
+' Helper to evaluate a single rule.
+' Returns a 0-based Array: (RuleName, Type, Exposure, WarningLimit, BreachLimit, Status)
+' Returns Empty if ruleKey is not recognized.
+Private Function EvaluateSingleRule(port As Portfolio, ruleKey As String, limitBreach As Double) As Variant
+
+    Dim exp As Double
+    Dim res As Variant
+
+    Select Case UCase(Trim(ruleKey))
+        Case "DELTAEQUITY_MIN"
+            exp = port.GetEquityDelta()
+            res = EvaluateThreshold(exp, limitBreach, "MIN")
+            EvaluateSingleRule = Array("Delta Equity Minimum", "MIN", exp, res(0), limitBreach, res(1))
+
+        Case "DELTAEQUITY_MAX"
+            exp = port.GetEquityDelta()
+            res = EvaluateThreshold(exp, limitBreach, "MAX")
+            EvaluateSingleRule = Array("Delta Equity Maximum", "MAX", exp, res(0), limitBreach, res(1))
+
+        Case "BONDS_MIN"
+            exp = Calc_Bonds(port)
+            res = EvaluateThreshold(exp, limitBreach, "MIN")
+            EvaluateSingleRule = Array("Bonds Minimum", "MIN", exp, res(0), limitBreach, res(1))
+
+        Case "BONDS_MAX"
+            exp = Calc_Bonds(port)
+            res = EvaluateThreshold(exp, limitBreach, "MAX")
+            EvaluateSingleRule = Array("Bonds Maximum", "MAX", exp, res(0), limitBreach, res(1))
+
+        Case "ALTERNATIVE_MAX"
+            exp = Calc_Alternative(port)
+            res = EvaluateThreshold(exp, limitBreach, "MAX")
+            EvaluateSingleRule = Array("Alternative Maximum", "MAX", exp, res(0), limitBreach, res(1))
+
+        Case "RISKOFF_MIN"
+            exp = Calc_RiskOff(port)
+            res = EvaluateThreshold(exp, limitBreach, "MIN")
+            EvaluateSingleRule = Array("Risk Off Minimum", "MIN", exp, res(0), limitBreach, res(1))
+
+        Case "STRUCTURED_MAX"
+            exp = Calc_StructuredProducts(port)
+            res = EvaluateThreshold(exp, limitBreach, "MAX")
+            EvaluateSingleRule = Array("Structured Products Maximum", "MAX", exp, res(0), limitBreach, res(1))
+
+        Case Else
+            EvaluateSingleRule = Empty
+    End Select
+
+End Function
+
 
 Private Function CreateRow(v1 As Variant, v2 As Variant, v3 As Variant, v4 As Variant, v5 As Variant, v6 As Variant) As Variant
     Dim arr(1 To 6) As Variant
@@ -148,8 +244,6 @@ Private Function EvaluateThreshold(exposure As Double, breachLimit As Double, ru
         warningLimit = 0
     End If
 
-    ' Return 1-based array to match the CollectionTo2DArray expectation if needed,
-    ' or just return standard 0-based Array. Here using 0-based for internal use.
     EvaluateThreshold = Array(warningLimit, status)
 End Function
 
