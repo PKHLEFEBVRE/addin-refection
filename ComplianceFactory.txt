@@ -28,8 +28,20 @@ Public Function GenerateComplianceReport(port As Portfolio) As Variant
         Exit Function
     End If
 
+    ' Extract appropriate positions dictionary based on trades
+    Dim dictToUse As Dictionary
+    If Not port.trades Is Nothing Then
+        If port.trades.count > 0 Then
+            Set dictToUse = port.GetPositionsWithTrades()
+        Else
+            Set dictToUse = port.GetPositions(Date) ' Assuming Date if preTrade context isn't explicit here, but usually passed
+        End If
+    Else
+        Set dictToUse = port.GetPositions(Date)
+    End If
+
     For Each ruleKey In port.exposureLimits.Keys
-        res = EvaluateSingleRule(port, CStr(ruleKey), port.exposureLimits(ruleKey))
+        res = EvaluateSingleRule(port, dictToUse, CStr(ruleKey), port.exposureLimits(ruleKey))
         If Not IsEmpty(res) Then
             reportRows.Add CreateRow(res(0), res(1), res(2), res(3), res(4), res(5))
         End If
@@ -40,22 +52,38 @@ Public Function GenerateComplianceReport(port As Portfolio) As Variant
 End Function
 
 ' Generates a consolidated matrix report for all portfolios
-Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary) As Variant
+Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary, preTrade As Boolean, Optional dt As Date = 0) As Variant
+
+    If dt = 0 Then dt = Date ' Default to today if not provided
 
     Dim pKey As Variant
     Dim port As Portfolio
     Dim ruleKey As Variant
 
-    ' 1. Identify all unique rules across all portfolios
+    ' 1. Identify all unique rules across all evaluated portfolios
     Dim uniqueRules As New Dictionary
     For Each pKey In portfolios
         Set port = portfolios(pKey)
-        If Not port.exposureLimits Is Nothing Then
-            For Each ruleKey In port.exposureLimits.Keys
-                If Not uniqueRules.Exists(ruleKey) Then
-                    uniqueRules.Add ruleKey, ruleKey
-                End If
-            Next ruleKey
+
+        ' If preTrade is True, we only care about portfolios with trades
+        Dim skipPort As Boolean
+        skipPort = False
+        If preTrade Then
+            If port.trades Is Nothing Then
+                skipPort = True
+            ElseIf port.trades.count = 0 Then
+                skipPort = True
+            End If
+        End If
+
+        If Not skipPort Then
+            If Not port.exposureLimits Is Nothing Then
+                For Each ruleKey In port.exposureLimits.Keys
+                    If Not uniqueRules.Exists(ruleKey) Then
+                        uniqueRules.Add ruleKey, ruleKey
+                    End If
+                Next ruleKey
+            End If
         End If
     Next pKey
 
@@ -64,8 +92,25 @@ Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary) As 
         Exit Function
     End If
 
+    ' Determine number of rows (only counting non-skipped portfolios)
+    Dim nRows As Long: nRows = 1
+    For Each pKey In portfolios
+        Set port = portfolios(pKey)
+        If preTrade Then
+            If Not port.trades Is Nothing Then
+                If port.trades.count > 0 Then nRows = nRows + 1
+            End If
+        Else
+            nRows = nRows + 1
+        End If
+    Next pKey
+
+    If nRows = 1 Then ' Only header
+        GenerateAggregatedComplianceReport = Array()
+        Exit Function
+    End If
+
     ' 2. Initialize Report Array
-    Dim nRows As Long: nRows = portfolios.count + 1
     Dim nCols As Long: nCols = 1 + (uniqueRules.count * 3)
     Dim report() As Variant
     ReDim report(1 To nRows, 1 To nCols)
@@ -88,40 +133,61 @@ Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary) As 
     Dim r As Long: r = 2
     Dim res As Variant
     Dim limitBreach As Double
+    Dim dictToUse As Dictionary
 
     For Each pKey In portfolios
         Set port = portfolios(pKey)
-        report(r, 1) = port.Name
 
-        For Each rKey In uniqueRules.Keys
-            c = colMap(rKey)
+        Dim skipPort2 As Boolean
+        skipPort2 = False
+        If preTrade Then
+            If port.trades Is Nothing Then
+                skipPort2 = True
+            ElseIf port.trades.count = 0 Then
+                skipPort2 = True
+            End If
+        End If
 
-            If Not port.exposureLimits Is Nothing Then
-                If port.exposureLimits.Exists(rKey) Then
-                    limitBreach = port.exposureLimits(rKey)
-                    res = EvaluateSingleRule(port, CStr(rKey), limitBreach)
+        If Not skipPort2 Then
+            report(r, 1) = port.Name
 
-                    If Not IsEmpty(res) Then
-                        report(r, c) = res(2)     ' Exposure
-                        report(r, c + 1) = res(4) ' Breach Limit
-                        report(r, c + 2) = res(5) ' Status
+            ' Determine which dictionary to use
+            If preTrade And port.trades.count > 0 Then
+                Set dictToUse = port.GetPositionsWithTrades()
+            Else
+                Set dictToUse = port.GetPositions(dt)
+            End If
+
+            For Each rKey In uniqueRules.Keys
+                c = colMap(rKey)
+
+                If Not port.exposureLimits Is Nothing Then
+                    If port.exposureLimits.Exists(rKey) Then
+                        limitBreach = port.exposureLimits(rKey)
+                        res = EvaluateSingleRule(port, dictToUse, CStr(rKey), limitBreach)
+
+                        If Not IsEmpty(res) Then
+                            report(r, c) = res(2)     ' Exposure
+                            report(r, c + 1) = res(4) ' Breach Limit
+                            report(r, c + 2) = res(5) ' Status
+                        Else
+                            report(r, c) = "Err"
+                            report(r, c + 1) = "Err"
+                            report(r, c + 2) = "Err"
+                        End If
                     Else
-                        report(r, c) = "Err"
-                        report(r, c + 1) = "Err"
-                        report(r, c + 2) = "Err"
+                        report(r, c) = "N/A"
+                        report(r, c + 1) = "N/A"
+                        report(r, c + 2) = "N/A"
                     End If
                 Else
                     report(r, c) = "N/A"
                     report(r, c + 1) = "N/A"
                     report(r, c + 2) = "N/A"
                 End If
-            Else
-                report(r, c) = "N/A"
-                report(r, c + 1) = "N/A"
-                report(r, c + 2) = "N/A"
-            End If
-        Next rKey
-        r = r + 1
+            Next rKey
+            r = r + 1
+        End If
     Next pKey
 
     GenerateAggregatedComplianceReport = report
@@ -131,44 +197,44 @@ End Function
 ' Helper to evaluate a single rule.
 ' Returns a 0-based Array: (RuleName, Type, Exposure, WarningLimit, BreachLimit, Status)
 ' Returns Empty if ruleKey is not recognized.
-Private Function EvaluateSingleRule(port As Portfolio, ruleKey As String, limitBreach As Double) As Variant
+Private Function EvaluateSingleRule(port As Portfolio, positionsDict As Dictionary, ruleKey As String, limitBreach As Double) As Variant
 
     Dim exp As Double
     Dim res As Variant
 
     Select Case UCase(Trim(ruleKey))
         Case "DELTAEQUITY_MIN"
-            exp = port.GetEquityDelta()
+            exp = port.GetEquityDelta(positionsDict)
             res = EvaluateThreshold(exp, limitBreach, "MIN")
             EvaluateSingleRule = Array("Delta Equity Minimum", "MIN", exp, res(0), limitBreach, res(1))
 
         Case "DELTAEQUITY_MAX"
-            exp = port.GetEquityDelta()
+            exp = port.GetEquityDelta(positionsDict)
             res = EvaluateThreshold(exp, limitBreach, "MAX")
             EvaluateSingleRule = Array("Delta Equity Maximum", "MAX", exp, res(0), limitBreach, res(1))
 
         Case "BONDS_MIN"
-            exp = Calc_Bonds(port)
+            exp = Calc_Bonds(positionsDict)
             res = EvaluateThreshold(exp, limitBreach, "MIN")
             EvaluateSingleRule = Array("Bonds Minimum", "MIN", exp, res(0), limitBreach, res(1))
 
         Case "BONDS_MAX"
-            exp = Calc_Bonds(port)
+            exp = Calc_Bonds(positionsDict)
             res = EvaluateThreshold(exp, limitBreach, "MAX")
             EvaluateSingleRule = Array("Bonds Maximum", "MAX", exp, res(0), limitBreach, res(1))
 
         Case "ALTERNATIVE_MAX"
-            exp = Calc_Alternative(port)
+            exp = Calc_Alternative(positionsDict)
             res = EvaluateThreshold(exp, limitBreach, "MAX")
             EvaluateSingleRule = Array("Alternative Maximum", "MAX", exp, res(0), limitBreach, res(1))
 
         Case "RISKOFF_MIN"
-            exp = Calc_RiskOff(port)
+            exp = Calc_RiskOff(positionsDict)
             res = EvaluateThreshold(exp, limitBreach, "MIN")
             EvaluateSingleRule = Array("Risk Off Minimum", "MIN", exp, res(0), limitBreach, res(1))
 
         Case "STRUCTURED_MAX"
-            exp = Calc_StructuredProducts(port)
+            exp = Calc_StructuredProducts(positionsDict)
             res = EvaluateThreshold(exp, limitBreach, "MAX")
             EvaluateSingleRule = Array("Structured Products Maximum", "MAX", exp, res(0), limitBreach, res(1))
 
@@ -251,16 +317,16 @@ End Function
 ' Rule Calculation Helpers
 ' ---------------------------------------------------------
 
-Private Function Calc_Bonds(port As Portfolio) As Double
+Private Function Calc_Bonds(positionsDict As Dictionary) As Double
     Dim sum As Double
     Dim key As Variant
     Dim pos As Position
     Dim inst As Instrument
 
-    If port.positions Is Nothing Then Exit Function
+    If positionsDict Is Nothing Then Exit Function
 
-    For Each key In port.positions
-        Set pos = port.positions(key)
+    For Each key In positionsDict
+        Set pos = positionsDict(key)
         Set inst = pos.posInstrument
 
         If Not inst Is Nothing Then
@@ -273,16 +339,16 @@ Private Function Calc_Bonds(port As Portfolio) As Double
     Calc_Bonds = sum
 End Function
 
-Private Function Calc_Alternative(port As Portfolio) As Double
+Private Function Calc_Alternative(positionsDict As Dictionary) As Double
     Dim sum As Double
     Dim key As Variant
     Dim pos As Position
     Dim inst As Instrument
 
-    If port.positions Is Nothing Then Exit Function
+    If positionsDict Is Nothing Then Exit Function
 
-    For Each key In port.positions
-        Set pos = port.positions(key)
+    For Each key In positionsDict
+        Set pos = positionsDict(key)
         Set inst = pos.posInstrument
 
         If Not inst Is Nothing Then
@@ -295,17 +361,17 @@ Private Function Calc_Alternative(port As Portfolio) As Double
     Calc_Alternative = sum
 End Function
 
-Private Function Calc_RiskOff(port As Portfolio) As Double
+Private Function Calc_RiskOff(positionsDict As Dictionary) As Double
     Dim sum As Double
     Dim key As Variant
     Dim pos As Position
     Dim inst As Instrument
     Dim isBond As Boolean
 
-    If port.positions Is Nothing Then Exit Function
+    If positionsDict Is Nothing Then Exit Function
 
-    For Each key In port.positions
-        Set pos = port.positions(key)
+    For Each key In positionsDict
+        Set pos = positionsDict(key)
         Set inst = pos.posInstrument
 
         If Not inst Is Nothing Then
@@ -320,16 +386,16 @@ Private Function Calc_RiskOff(port As Portfolio) As Double
     Calc_RiskOff = sum
 End Function
 
-Private Function Calc_StructuredProducts(port As Portfolio) As Double
+Private Function Calc_StructuredProducts(positionsDict As Dictionary) As Double
     Dim sum As Double
     Dim key As Variant
     Dim pos As Position
     Dim inst As Instrument
 
-    If port.positions Is Nothing Then Exit Function
+    If positionsDict Is Nothing Then Exit Function
 
-    For Each key In port.positions
-        Set pos = port.positions(key)
+    For Each key In positionsDict
+        Set pos = positionsDict(key)
         Set inst = pos.posInstrument
 
         If Not inst Is Nothing Then

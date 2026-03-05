@@ -236,15 +236,22 @@ Public Function GetPositionsWithTrades() As Dictionary
 End Function
 
 
-Public Function GetEquityDelta() As Double
+Public Function GetEquityDelta(Optional positionsToEvaluate As Dictionary = Nothing) As Double
     Dim sum As Double
     Dim key As Variant
     Dim pos As Position
+    Dim dictToUse As Dictionary
 
-    If positions Is Nothing Then Exit Function
+    If Not positionsToEvaluate Is Nothing Then
+        Set dictToUse = positionsToEvaluate
+    Else
+        Set dictToUse = positions
+    End If
 
-    For Each key In positions
-        Set pos = positions(key)
+    If dictToUse Is Nothing Then Exit Function
+
+    For Each key In dictToUse
+        Set pos = dictToUse(key)
         If Not pos.posInstrument Is Nothing Then
             sum = sum + (pos.weight * pos.posInstrument.equityDelta)
         End If
