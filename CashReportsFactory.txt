@@ -1,0 +1,115 @@
+Option Explicit
+
+' Generates an aggregated Cash Report for all portfolios
+Public Function GenerateCashReport(portfolios As Dictionary) As Variant
+
+    If portfolios Is Nothing Then
+        GenerateCashReport = Array()
+        Exit Function
+    End If
+
+    If portfolios.count = 0 Then
+        GenerateCashReport = Array()
+        Exit Function
+    End If
+
+    Dim nRows As Long
+    nRows = portfolios.count + 1
+
+    Dim report() As Variant
+    ReDim report(1 To nRows, 1 To 6)
+
+    ' Headers
+    report(1, 1) = "Fund Name"
+    report(1, 2) = "Base Cash Weight"
+    report(1, 3) = "Base Cash Status"
+    report(1, 4) = "Total Cash Weight"
+    report(1, 5) = "Total Cash Limit"
+    report(1, 6) = "Total Cash Status"
+
+    Dim r As Long
+    r = 2
+
+    Dim pKey As Variant
+    Dim port As Portfolio
+    Dim posKey As Variant
+    Dim pos As Position
+
+    Dim baseCashSum As Double
+    Dim totalCashSum As Double
+    Dim isCash As Boolean
+
+    Dim baseCashLimit As Double
+    Dim totalCashLimit As Double
+
+    baseCashLimit = 0.0025 ' 0.25%
+
+    For Each pKey In portfolios
+        Set port = portfolios(pKey)
+
+        baseCashSum = 0
+        totalCashSum = 0
+
+        ' 1. Calculate Cash Exposures
+        If Not port.positions Is Nothing Then
+            For Each posKey In port.positions
+                Set pos = port.positions(posKey)
+                isCash = False
+
+                ' Identify Cash Position
+                If Not pos.posInstrument Is Nothing Then
+                    If LCase(Trim(pos.posInstrument.category)) = "cash" Then
+                        isCash = True
+                    End If
+                End If
+                ' Fallback identification just in case instrument is missing but it is a clear cash line
+                If Not isCash And (pos.posID = "10" Or pos.posID = pos.ccy) Then
+                    isCash = True
+                End If
+
+                If isCash Then
+                    totalCashSum = totalCashSum + pos.weight
+
+                    If UCase(Trim(pos.ccy)) = UCase(Trim(port.ccy)) Then
+                        baseCashSum = baseCashSum + pos.weight
+                    End If
+                End If
+            Next posKey
+        End If
+
+        ' 2. Determine Total Cash Limit
+        If port.AUM < 150000 Then
+            totalCashLimit = 0.05 ' 5%
+        Else
+            ' Check if fund is more than a year old
+            If (Date - port.creationDate) > 365.25 Then
+                totalCashLimit = 0.02 ' 2%
+            Else
+                totalCashLimit = 0.03 ' 3%
+            End If
+        End If
+
+        ' 3. Populate Report Row
+        report(r, 1) = port.Name
+
+        report(r, 2) = baseCashSum
+        If baseCashSum < baseCashLimit Then
+            report(r, 3) = "BREACH"
+        Else
+            report(r, 3) = "PASS"
+        End If
+
+        report(r, 4) = totalCashSum
+        report(r, 5) = totalCashLimit
+        If totalCashSum > totalCashLimit Then
+            report(r, 6) = "BREACH"
+        Else
+            report(r, 6) = "PASS"
+        End If
+
+        r = r + 1
+    Next pKey
+
+    GenerateCashReport = report
+
+End Function
