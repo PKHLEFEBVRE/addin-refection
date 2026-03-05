@@ -234,3 +234,21 @@ Public Function GetPositionsWithTrades() As Dictionary
     Set GetPositionsWithTrades = simPositions
 
 End Function
+
+
+Public Function GetEquityDelta() As Double
+    Dim sum As Double
+    Dim key As Variant
+    Dim pos As Position
+
+    If positions Is Nothing Then Exit Function
+
+    For Each key In positions
+        Set pos = positions(key)
+        If Not pos.posInstrument Is Nothing Then
+            sum = sum + (pos.weight * pos.posInstrument.equityDelta)
+        End If
+    Next key
+
+    GetEquityDelta = sum
+End Function

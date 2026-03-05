@@ -5,78 +5,149 @@ Option Explicit
 Public Function GenerateComplianceReport(port As Portfolio) As Variant
 
     Dim rulesCount As Integer
-    rulesCount = 4 ' Total number of rules
+    rulesCount = 7 ' Delta Min, Delta Max, Bonds Min, Bonds Max, Alternative Max, Risk Off Min, Structured Max
 
     Dim report() As Variant
-    ReDim report(1 To rulesCount + 1, 1 To 4)
+    ReDim report(1 To rulesCount + 1, 1 To 6)
 
     ' Headers
     report(1, 1) = "Rule Name"
-    report(1, 2) = "Current Exposure"
-    report(1, 3) = "Limit"
-    report(1, 4) = "Status"
+    report(1, 2) = "Type"
+    report(1, 3) = "Current Exposure"
+    report(1, 4) = "Warning Level"
+    report(1, 5) = "Breach Level"
+    report(1, 6) = "Status"
 
     Dim r As Integer
     r = 2
 
-    ' --- Rule 1: Max Equity Exposure ---
-    Dim expEquity As Double
-    Dim limitEquity As Double
-    expEquity = Calc_TotalEquity(port)
-    ' Read limit from portfolio or default
-    If port.exposureLimits.Exists("MaxEquity") Then limitEquity = port.exposureLimits("MaxEquity") Else limitEquity = 0.6 ' Default 60%
+    Dim exp As Double
+    Dim limitBreach As Double
+    Dim res As Variant
 
-    report(r, 1) = "Max Total Equity"
-    report(r, 2) = expEquity
-    report(r, 3) = limitEquity
-    report(r, 4) = IIf(expEquity <= limitEquity, "PASS", "FAIL")
+    ' --- Rule 1: Delta Equity Minimum ---
+    exp = port.GetEquityDelta()
+    If port.exposureLimits.Exists("DeltaEquity_Min") Then limitBreach = port.exposureLimits("DeltaEquity_Min") Else limitBreach = 0
+    res = EvaluateThreshold(exp, limitBreach, "MIN")
+    report(r, 1) = "Delta Equity Minimum"
+    report(r, 2) = "MIN"
+    report(r, 3) = exp
+    report(r, 4) = res(0) ' Warning Level
+    report(r, 5) = limitBreach ' Breach Level
+    report(r, 6) = res(1) ' Status
     r = r + 1
 
-    ' --- Rule 2: Equity Europe Specific ---
-    Dim expEqEurope As Double
-    Dim limitEqEurope As Double
-    expEqEurope = Calc_EquityEurope(port)
-    If port.exposureLimits.Exists("MaxEquityEurope") Then limitEqEurope = port.exposureLimits("MaxEquityEurope") Else limitEqEurope = 0.3
-
-    report(r, 1) = "Max Equity Europe"
-    report(r, 2) = expEqEurope
-    report(r, 3) = limitEqEurope
-    report(r, 4) = IIf(expEqEurope <= limitEqEurope, "PASS", "FAIL")
+    ' --- Rule 2: Delta Equity Maximum ---
+    ' Re-use exp
+    If port.exposureLimits.Exists("DeltaEquity_Max") Then limitBreach = port.exposureLimits("DeltaEquity_Max") Else limitBreach = 1
+    res = EvaluateThreshold(exp, limitBreach, "MAX")
+    report(r, 1) = "Delta Equity Maximum"
+    report(r, 2) = "MAX"
+    report(r, 3) = exp
+    report(r, 4) = res(0)
+    report(r, 5) = limitBreach
+    report(r, 6) = res(1)
     r = r + 1
 
-    ' --- Rule 3: Max Single Issuer (Diversification) ---
-    Dim expMaxIssuer As Double
-    Dim limitMaxIssuer As Double
-    expMaxIssuer = Calc_MaxSingleIssuer(port)
-    If port.exposureLimits.Exists("MaxSingleIssuer") Then limitMaxIssuer = port.exposureLimits("MaxSingleIssuer") Else limitMaxIssuer = 0.1 ' Default 10%
-
-    report(r, 1) = "Max Single Issuer Exposure"
-    report(r, 2) = expMaxIssuer
-    report(r, 3) = limitMaxIssuer
-    report(r, 4) = IIf(expMaxIssuer <= limitMaxIssuer, "PASS", "FAIL")
+    ' --- Rule 3: Bonds Minimum ---
+    exp = Calc_Bonds(port)
+    If port.exposureLimits.Exists("Bonds_Min") Then limitBreach = port.exposureLimits("Bonds_Min") Else limitBreach = 0
+    res = EvaluateThreshold(exp, limitBreach, "MIN")
+    report(r, 1) = "Bonds Minimum"
+    report(r, 2) = "MIN"
+    report(r, 3) = exp
+    report(r, 4) = res(0)
+    report(r, 5) = limitBreach
+    report(r, 6) = res(1)
     r = r + 1
 
-    ' --- Rule 4: Max High Yield (Rating Worse than BBB-) ---
-    Dim expHighYield As Double
-    Dim limitHighYield As Double
-    expHighYield = Calc_HighYield(port)
-    If port.exposureLimits.Exists("MaxHighYield") Then limitHighYield = port.exposureLimits("MaxHighYield") Else limitHighYield = 0.15 ' Default 15%
+    ' --- Rule 4: Bonds Maximum ---
+    ' Re-use exp
+    If port.exposureLimits.Exists("Bonds_Max") Then limitBreach = port.exposureLimits("Bonds_Max") Else limitBreach = 1
+    res = EvaluateThreshold(exp, limitBreach, "MAX")
+    report(r, 1) = "Bonds Maximum"
+    report(r, 2) = "MAX"
+    report(r, 3) = exp
+    report(r, 4) = res(0)
+    report(r, 5) = limitBreach
+    report(r, 6) = res(1)
+    r = r + 1
 
-    report(r, 1) = "Max High Yield (Rating < BBB-)"
-    report(r, 2) = expHighYield
-    report(r, 3) = limitHighYield
-    report(r, 4) = IIf(expHighYield <= limitHighYield, "PASS", "FAIL")
+    ' --- Rule 5: Alternative Maximum ---
+    exp = Calc_Alternative(port)
+    If port.exposureLimits.Exists("Alternative_Max") Then limitBreach = port.exposureLimits("Alternative_Max") Else limitBreach = 0.1
+    res = EvaluateThreshold(exp, limitBreach, "MAX")
+    report(r, 1) = "Alternative Maximum"
+    report(r, 2) = "MAX"
+    report(r, 3) = exp
+    report(r, 4) = res(0)
+    report(r, 5) = limitBreach
+    report(r, 6) = res(1)
+    r = r + 1
+
+    ' --- Rule 6: Risk Off Minimum ---
+    exp = Calc_RiskOff(port)
+    If port.exposureLimits.Exists("RiskOff_Min") Then limitBreach = port.exposureLimits("RiskOff_Min") Else limitBreach = 0
+    res = EvaluateThreshold(exp, limitBreach, "MIN")
+    report(r, 1) = "Risk Off Minimum"
+    report(r, 2) = "MIN"
+    report(r, 3) = exp
+    report(r, 4) = res(0)
+    report(r, 5) = limitBreach
+    report(r, 6) = res(1)
+    r = r + 1
+
+    ' --- Rule 7: Structured Products Maximum ---
+    exp = Calc_StructuredProducts(port)
+    If port.exposureLimits.Exists("Structured_Max") Then limitBreach = port.exposureLimits("Structured_Max") Else limitBreach = 0.1
+    res = EvaluateThreshold(exp, limitBreach, "MAX")
+    report(r, 1) = "Structured Products Maximum"
+    report(r, 2) = "MAX"
+    report(r, 3) = exp
+    report(r, 4) = res(0)
+    report(r, 5) = limitBreach
+    report(r, 6) = res(1)
 
     GenerateComplianceReport = report
 
+End Function
+
+' Evaluates exposure against a breach limit and returns an Array(WarningLevel, Status)
+Private Function EvaluateThreshold(exposure As Double, breachLimit As Double, ruleType As String) As Variant
+    Dim warningLimit As Double
+    Dim status As String
+
+    If ruleType = "MAX" Then
+        warningLimit = breachLimit * 0.9
+        If exposure > breachLimit Then
+            status = "BREACH"
+        ElseIf exposure > warningLimit Then
+            status = "WARNING"
+        Else
+            status = "PASS"
+        End If
+    ElseIf ruleType = "MIN" Then
+        warningLimit = breachLimit * 1.1
+        If exposure < breachLimit Then
+            status = "BREACH"
+        ElseIf exposure < warningLimit Then
+            status = "WARNING"
+        Else
+            status = "PASS"
+        End If
+    Else
+        status = "UNKNOWN"
+        warningLimit = 0
+    End If
+
+    EvaluateThreshold = Array(warningLimit, status)
 End Function
 
 ' ---------------------------------------------------------
 ' Rule Calculation Helpers
 ' ---------------------------------------------------------
 
-' Example A: Asset Class = 'Equity' AND Geography = 'Europe'
-Private Function Calc_EquityEurope(port As Portfolio) As Double
+Private Function Calc_Bonds(port As Portfolio) As Double
     Dim sum As Double
     Dim key As Variant
     Dim pos As Position
@@ -89,17 +160,16 @@ Private Function Calc_EquityEurope(port As Portfolio) As Double
         Set inst = pos.posInstrument
 
         If Not inst Is Nothing Then
-            If LCase(Trim(inst.assetClass)) = "equity" And LCase(Trim(inst.geography)) = "europe" Then
+            If LCase(Trim(inst.assetClass)) = "bond" And LCase(Trim(inst.category)) <> "certificates" Then
                 sum = sum + pos.weight
             End If
         End If
     Next key
 
-    Calc_EquityEurope = sum
+    Calc_Bonds = sum
 End Function
 
-' Example B: Just total Equity
-Private Function Calc_TotalEquity(port As Portfolio) As Double
+Private Function Calc_Alternative(port As Portfolio) As Double
     Dim sum As Double
     Dim key As Variant
     Dim pos As Position
@@ -112,63 +182,21 @@ Private Function Calc_TotalEquity(port As Portfolio) As Double
         Set inst = pos.posInstrument
 
         If Not inst Is Nothing Then
-            If LCase(Trim(inst.assetClass)) = "equity" Then
+            If LCase(Trim(inst.category)) = "alternatives investment" Then
                 sum = sum + pos.weight
             End If
         End If
     Next key
 
-    Calc_TotalEquity = sum
+    Calc_Alternative = sum
 End Function
 
-' Example C: Max Single Issuer (Finds the highest exposure to any single issuer)
-Private Function Calc_MaxSingleIssuer(port As Portfolio) As Double
-    Dim issuerExposures As New Dictionary
-    Dim key As Variant
-    Dim pos As Position
-    Dim inst As Instrument
-    Dim issuerName As String
-    Dim maxExp As Double
-
-    If port.positions Is Nothing Then Exit Function
-
-    ' Aggregate weights by Issuer
-    For Each key In port.positions
-        Set pos = port.positions(key)
-        Set inst = pos.posInstrument
-
-        If Not inst Is Nothing Then
-            issuerName = UCase(Trim(inst.issuer))
-            ' Skip empty issuers or cash accounts typically not counted in this rule
-            If issuerName <> "" And LCase(Trim(inst.category)) <> "cash" Then
-                If issuerExposures.Exists(issuerName) Then
-                    issuerExposures(issuerName) = issuerExposures(issuerName) + pos.weight
-                Else
-                    issuerExposures.Add issuerName, pos.weight
-                End If
-            End If
-        End If
-    Next key
-
-    ' Find max
-    maxExp = 0
-    Dim issuerKey As Variant
-    For Each issuerKey In issuerExposures
-        If issuerExposures(issuerKey) > maxExp Then
-            maxExp = issuerExposures(issuerKey)
-        End If
-    Next issuerKey
-
-    Calc_MaxSingleIssuer = maxExp
-End Function
-
-' Example D: High Yield (Demonstrates "Greater Than" / "Worse Than" logic)
-Private Function Calc_HighYield(port As Portfolio) As Double
+Private Function Calc_RiskOff(port As Portfolio) As Double
     Dim sum As Double
     Dim key As Variant
     Dim pos As Position
     Dim inst As Instrument
-    Dim ratingScore As Integer
+    Dim isBond As Boolean
 
     If port.positions Is Nothing Then Exit Function
 
@@ -177,52 +205,35 @@ Private Function Calc_HighYield(port As Portfolio) As Double
         Set inst = pos.posInstrument
 
         If Not inst Is Nothing Then
-            ' Only evaluate bonds
-            If LCase(Trim(inst.assetClass)) = "bond" Then
+            isBond = (LCase(Trim(inst.assetClass)) = "bond" And LCase(Trim(inst.category)) <> "certificates")
 
-                ' If no rating, sometimes it's treated as HY, sometimes excluded.
-                ' We will assume unrated is NOT HY for this basic example, or you can adjust.
-                If inst.minRating <> "N/A" And inst.minRating <> "" Then
-                    ratingScore = GetRatingScore(inst.minRating)
-                    ' BBB- is score 10. Anything strictly greater than 10 is High Yield (BB+ and below)
-                    If ratingScore > 10 Then
-                        sum = sum + pos.weight
-                    End If
-                End If
-
+            If isBond Or LCase(Trim(inst.assetClass)) = "real estate" Or LCase(Trim(inst.assetClass)) = "cash" Then
+                sum = sum + pos.weight
             End If
         End If
     Next key
 
-    Calc_HighYield = sum
+    Calc_RiskOff = sum
 End Function
 
-' Helper to convert string rating to numerical scale based on Instrument.txt logic
-Private Function GetRatingScore(rating As String) As Integer
-    Dim r As String
-    r = UCase(Trim(rating))
+Private Function Calc_StructuredProducts(port As Portfolio) As Double
+    Dim sum As Double
+    Dim key As Variant
+    Dim pos As Position
+    Dim inst As Instrument
 
-    Select Case r
-        Case "AAA": GetRatingScore = 1
-        Case "AA+": GetRatingScore = 2
-        Case "AA": GetRatingScore = 3
-        Case "AA-": GetRatingScore = 4
-        Case "A+": GetRatingScore = 5
-        Case "A": GetRatingScore = 6
-        Case "A-": GetRatingScore = 7
-        Case "BBB+": GetRatingScore = 8
-        Case "BBB": GetRatingScore = 9
-        Case "BBB-": GetRatingScore = 10
-        Case "BB+": GetRatingScore = 11
-        Case "BB": GetRatingScore = 12
-        Case "BB-": GetRatingScore = 13
-        Case "B+": GetRatingScore = 14
-        Case "B": GetRatingScore = 15
-        Case "B-": GetRatingScore = 16
-        Case "CCC": GetRatingScore = 17
-        Case "CC": GetRatingScore = 18
-        Case "C": GetRatingScore = 19
-        Case "D": GetRatingScore = 20
-        Case Else: GetRatingScore = 0
-    End Select
+    If port.positions Is Nothing Then Exit Function
+
+    For Each key In port.positions
+        Set pos = port.positions(key)
+        Set inst = pos.posInstrument
+
+        If Not inst Is Nothing Then
+            If LCase(Trim(inst.category)) = "certificates" Then
+                sum = sum + pos.weight
+            End If
+        End If
+    Next key
+
+    Calc_StructuredProducts = sum
 End Function
