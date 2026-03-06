@@ -2,9 +2,12 @@ Option Explicit
 
 Private Const MONEY_MARKET_ID As String = "MM_FUND_PLACEHOLDER" ' TODO: Update with actual Money Market ID
 
-Public Function ComputeBenchmark(targetPortfolio As Portfolio, Optional applyTimeAdjustment As Boolean = False) As Portfolio
+Public Function ComputeBenchmark(targetPortfolio As Portfolio, Optional applyTimeAdjustment As Boolean = False) As Dictionary
 
+    Dim benchmarkDict As New Dictionary
     Dim benchmark As New Portfolio
+    Dim tradesPort As Portfolio
+
     benchmark.Name = "Benchmark for " & targetPortfolio.Name
 
     ' 1. Load Data
@@ -60,7 +63,20 @@ Public Function ComputeBenchmark(targetPortfolio As Portfolio, Optional applyTim
     ' 7. Final Quantity Calculation
     CalculateQuantities benchmark, targetPortfolio.AUM
 
-    Set ComputeBenchmark = benchmark
+    ' 8. Construct Output Dictionary
+    benchmarkDict.Add "composition", benchmark
+
+    ' 9. Propose Main Trades (Large Discrepancies)
+    On Error Resume Next
+    Set tradesPort = TradeProposer.ProposeTradesAsPortfolio(targetPortfolio, benchmark)
+    If Err.Number = 0 Then
+        benchmarkDict.Add "trades", tradesPort
+    Else
+        Debug.Print "Warning: Could not compute trade proposals: " & Err.Description
+    End If
+    On Error GoTo 0
+
+    Set ComputeBenchmark = benchmarkDict
 
 End Function
 
@@ -168,23 +184,27 @@ Private Sub PruneSmallPositions(bench As Portfolio, totalAUM As Double, threshol
             Dim amount As Double
             amount = smallestPos.weight * totalAUM
 
-            If amount < threshold And amount > 0 Then
+            ' Remove any position below the threshold (including <= 0 to prevent infinite loop)
+            If amount < threshold Then
                 ' Remove position
                 bench.positions.Remove smallestPos.posID
                 removedAmount = amount
 
-                ' Redistribute proportionally
-                ' Calculate total remaining weight
-                totalWeight = 0
-                For Each pos In bench.positions.Items
-                    totalWeight = totalWeight + pos.weight
-                Next pos
-
-                If totalWeight > 0 Then
-                    ' Re-normalize to 100% of previous total (effectively distributing removed weight)
+                ' Redistribute proportionally only if a positive amount was removed
+                ' Negative amounts (shorts) below threshold are removed without redistribution
+                If removedAmount > 0 Then
+                    ' Calculate total remaining weight
+                    totalWeight = 0
                     For Each pos In bench.positions.Items
-                        pos.weight = pos.weight / totalWeight
+                        totalWeight = totalWeight + pos.weight
                     Next pos
+
+                    If totalWeight > 0 Then
+                        ' Re-normalize to 100% of previous total (effectively distributing removed weight)
+                        For Each pos In bench.positions.Items
+                            pos.weight = pos.weight / totalWeight
+                        Next pos
+                    End If
                 End If
 
                 continuePruning = True
