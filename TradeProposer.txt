@@ -2,8 +2,8 @@ Option Explicit
 
 Public Function ProposeTradesAsPortfolio(target As Portfolio, bench As Portfolio) As Portfolio
     ' Generate actionable trade proposals to align a target portfolio with its benchmark.
-    ' Focuses on large discrepancies (> 3%) across Asset Class, Geography, and Category.
-    ' Returns a Portfolio containing synthetic Positions representing the required trades.
+    ' Focuses on the single largest discrepancy (> 3%) across Asset Class, Geography, and Category.
+    ' Returns a Portfolio containing a synthetic Position representing the required trade.
 
     Dim tradesPort As New Portfolio
     tradesPort.Name = "Proposed Trades for " & target.Name
@@ -11,119 +11,204 @@ Public Function ProposeTradesAsPortfolio(target As Portfolio, bench As Portfolio
     Dim threshold As Double
     threshold = 0.03 ' 3% threshold for "large" discrepancies
 
-    ' 1. Check Asset Class discrepancies
+    ' 1. Create Difference Portfolio (Target - Benchmark)
+    Dim diffPort As Portfolio
+    Set diffPort = PortfolioFactory.CreateDiffPortfolio(target, bench)
+
+    ' 2. Calculate exposures of the difference portfolio
+    ' Positive exposure means Target > Benchmark (Overweight -> Need to Sell)
+    ' Negative exposure means Target < Benchmark (Underweight -> Need to Buy)
+
     Dim assetClassDiffs As Dictionary
-    Set assetClassDiffs = GetExposureDifferences(target, bench, "assetClass")
-    GenerateProposals assetClassDiffs, "AssetClass", threshold, tradesPort
+    Set assetClassDiffs = PositionsReportsFactory.GetExposure(diffPort, "assetClass")
 
-    ' 2. Check Geography discrepancies
     Dim geoDiffs As Dictionary
-    Set geoDiffs = GetExposureDifferences(target, bench, "geography")
-    GenerateProposals geoDiffs, "Geography", threshold, tradesPort
+    Set geoDiffs = PositionsReportsFactory.GetExposure(diffPort, "geography")
 
-    ' 3. Check Category discrepancies
     Dim catDiffs As Dictionary
-    Set catDiffs = GetExposureDifferences(target, bench, "category")
-    GenerateProposals catDiffs, "Category", threshold, tradesPort
+    Set catDiffs = PositionsReportsFactory.GetExposure(diffPort, "category")
+
+    ' 3. Find the single largest discrepancy across all three dimensions
+    Dim maxDiff As Double
+    Dim maxDimension As String
+    Dim maxKey As String
+    Dim key As Variant
+    Dim diff As Double
+
+    maxDiff = 0
+    maxDimension = ""
+    maxKey = ""
+
+    ' Check Asset Class
+    For Each key In assetClassDiffs.Keys
+        diff = assetClassDiffs(key)
+        If Abs(diff) > Abs(maxDiff) Then
+            maxDiff = diff
+            maxDimension = "AssetClass"
+            maxKey = CStr(key)
+        End If
+    Next key
+
+    ' Check Geography
+    For Each key In geoDiffs.Keys
+        diff = geoDiffs(key)
+        If Abs(diff) > Abs(maxDiff) Then
+            maxDiff = diff
+            maxDimension = "Geography"
+            maxKey = CStr(key)
+        End If
+    Next key
+
+    ' Check Category
+    For Each key In catDiffs.Keys
+        diff = catDiffs(key)
+        If Abs(diff) > Abs(maxDiff) Then
+            maxDiff = diff
+            maxDimension = "Category"
+            maxKey = CStr(key)
+        End If
+    Next key
+
+    ' 4. Generate the single proposal if it exceeds the threshold
+    ' Note: diff is Target - Benchmark.
+    ' To align target with benchmark, the trade weight is -diff.
+    Dim tradeWeight As Double
+    tradeWeight = -maxDiff
+
+    If Abs(tradeWeight) >= threshold Then
+        Dim pos As New Position
+        Dim syntheticId As String
+
+        syntheticId = maxDimension & "::" & maxKey
+
+        pos.posID = syntheticId
+        pos.name = "Adjust " & maxDimension & " exposure to " & maxKey
+        pos.weight = tradeWeight ' Positive weight means Buy, Negative means Sell
+
+        tradesPort.positions.Add pos.posID, pos
+    End If
 
     Set ProposeTradesAsPortfolio = tradesPort
 End Function
 
-Private Function GetExposureDifferences(target As Portfolio, bench As Portfolio, propertyName As String) As Dictionary
-    Dim targetExp As Dictionary
-    Dim benchExp As Dictionary
-    Dim diffs As New Dictionary
-    Dim key As Variant
-    Dim targetWeight As Double
-    Dim benchWeight As Double
-    Dim diff As Double
+Public Sub GenerateAndEmailProposals(portfolios As Dictionary, Optional emailTo As String = "")
+    ' Iterates through all portfolios, computes benchmarks, finds the largest trade proposals,
+    ' formats them into an HTML table, and sends an email via Outlook.
 
-    ' Calculate exposures manually to avoid external dependencies
-    Set targetExp = CalculateExposure(target, propertyName)
-    Set benchExp = CalculateExposure(bench, propertyName)
-
-    ' Get all unique keys from both portfolios
-    Dim allKeys As New Dictionary
-    For Each key In targetExp.Keys: allKeys(key) = 1: Next key
-    For Each key In benchExp.Keys: allKeys(key) = 1: Next key
-
-    ' Calculate diffs (Benchmark - Target) => Positive means we need to Buy, Negative means Sell
-    For Each key In allKeys.Keys
-        targetWeight = 0
-        If targetExp.Exists(key) Then targetWeight = targetExp(key)
-
-        benchWeight = 0
-        If benchExp.Exists(key) Then benchWeight = benchExp(key)
-
-        diff = benchWeight - targetWeight
-        If Abs(diff) > 0.0001 Then ' Avoid floating point noise
-            diffs.Add CStr(key), diff
-        End If
-    Next key
-
-    Set GetExposureDifferences = diffs
-End Function
-
-Private Function CalculateExposure(port As Portfolio, propertyName As String) As Dictionary
-    Dim exp As New Dictionary
+    Dim htmlBody As String
+    Dim portKey As Variant
+    Dim targetPortfolio As Portfolio
+    Dim benchDict As Dictionary
+    Dim tradesPort As Portfolio
     Dim posKey As Variant
-    Dim pos As Position
-    Dim inst As Instrument
-    Dim propValue As String
-    Dim weight As Double
+    Dim tradePos As Position
+    Dim hasProposals As Boolean
+    Dim action As String
+    Dim actionColor As String
 
-    If port.positions Is Nothing Then
-        Set CalculateExposure = exp
-        Exit Function
+    hasProposals = False
+
+    ' Construct HTML Header
+    htmlBody = "<html><body style='font-family: Arial, sans-serif;'>"
+    htmlBody = htmlBody & "<h2>Benchmark Trade Proposals</h2>"
+    htmlBody = htmlBody & "<p>The following table lists the single largest recommended trade (>3% discrepancy) to align each portfolio with its computed benchmark.</p>"
+    htmlBody = htmlBody & "<table border='1' cellpadding='5' cellspacing='0' style='border-collapse: collapse;'>"
+    htmlBody = htmlBody & "<tr style='background-color: #f2f2f2;'>"
+    htmlBody = htmlBody & "<th>Portfolio Name</th>"
+    htmlBody = htmlBody & "<th>Action</th>"
+    htmlBody = htmlBody & "<th>Weight to Adjust</th>"
+    htmlBody = htmlBody & "<th>Dimension</th>"
+    htmlBody = htmlBody & "<th>Value</th>"
+    htmlBody = htmlBody & "</tr>"
+
+    ' Process Portfolios
+    For Each portKey In portfolios.Keys
+        Set targetPortfolio = portfolios(portKey)
+
+        ' Compute benchmark (with optional time adjustment true/false - assume False here or pass as arg)
+        On Error Resume Next
+        Set benchDict = BenchmarkFactory.ComputeBenchmark(targetPortfolio, True) ' Enable time adjustment by default for proposals
+        If Err.Number = 0 And Not benchDict Is Nothing Then
+            Set tradesPort = benchDict("trades")
+
+            ' If there's a trade proposal
+            If Not tradesPort Is Nothing Then
+                If tradesPort.positions.Count > 0 Then
+                    hasProposals = True
+
+                    ' Only one position expected
+                    For Each posKey In tradesPort.positions.Keys
+                        Set tradePos = tradesPort.positions(posKey)
+
+                        ' Determine Action and Color
+                        If tradePos.weight > 0 Then
+                            action = "Buy"
+                            actionColor = "green"
+                        Else
+                            action = "Sell"
+                            actionColor = "red"
+                        End If
+
+                        ' Parse posID (e.g., "AssetClass::Equity")
+                        Dim dimensionParts() As String
+                        dimensionParts = Split(tradePos.posID, "::")
+                        Dim dimensionName As String
+                        Dim dimensionValue As String
+
+                        If UBound(dimensionParts) = 1 Then
+                            dimensionName = dimensionParts(0)
+                            dimensionValue = dimensionParts(1)
+                        Else
+                            dimensionName = "Unknown"
+                            dimensionValue = tradePos.posID
+                        End If
+
+                        ' Add row
+                        htmlBody = htmlBody & "<tr>"
+                        htmlBody = htmlBody & "<td>" & targetPortfolio.Name & "</td>"
+                        htmlBody = htmlBody & "<td style='color:" & actionColor & "; font-weight:bold;'>" & action & "</td>"
+                        htmlBody = htmlBody & "<td>" & Format(Abs(tradePos.weight), "0.00%") & "</td>"
+                        htmlBody = htmlBody & "<td>" & dimensionName & "</td>"
+                        htmlBody = htmlBody & "<td>" & dimensionValue & "</td>"
+                        htmlBody = htmlBody & "</tr>"
+                    Next posKey
+                End If
+            End If
+        Else
+            Debug.Print "Error computing benchmark for " & targetPortfolio.Name & ": " & Err.Description
+        End If
+        On Error GoTo 0
+    Next portKey
+
+    ' Finish HTML
+    htmlBody = htmlBody & "</table>"
+    If Not hasProposals Then
+        htmlBody = htmlBody & "<p><i>No large discrepancies (>3%) found for any portfolio.</i></p>"
+    End If
+    htmlBody = htmlBody & "</body></html>"
+
+    ' Send Email via Outlook COM
+    On Error Resume Next
+    Dim outApp As Object
+    Dim outMail As Object
+
+    Set outApp = CreateObject("Outlook.Application")
+    If outApp Is Nothing Then
+        MsgBox "Failed to create Outlook application object. Is Outlook installed?", vbCritical, "Email Error"
+        Exit Sub
     End If
 
-    For Each posKey In port.positions.Keys
-        Set pos = port.positions(posKey)
-        Set inst = pos.posInstrument
-        propValue = "N/A"
-        weight = pos.weight
+    Set outMail = outApp.CreateItem(0) ' 0 = olMailItem
 
-        ' Retrieve property value dynamically from Instrument
-        If Not inst Is Nothing Then
-            On Error Resume Next
-            propValue = CStr(CallByName(inst, propertyName, VbGet))
-            If Err.Number <> 0 Then propValue = "N/A"
-            On Error GoTo 0
-        End If
+    With outMail
+        If emailTo <> "" Then .To = emailTo
+        .Subject = "Benchmark Trade Proposals Report - " & Format(Date, "YYYY-MM-DD")
+        .HTMLBody = htmlBody
+        .Display ' Display rather than .Send automatically for safety/review
+    End With
 
-        ' Only aggregate valid dimensions
-        If propValue <> "N/A" And propValue <> "" Then
-            If exp.Exists(propValue) Then
-                exp(propValue) = exp(propValue) + weight
-            Else
-                exp.Add propValue, weight
-            End If
-        End If
-    Next posKey
+    Set outMail = Nothing
+    Set outApp = Nothing
+    On Error GoTo 0
 
-    Set CalculateExposure = exp
-End Function
-
-Private Sub GenerateProposals(diffs As Dictionary, dimensionName As String, threshold As Double, ByRef tradesPort As Portfolio)
-    Dim key As Variant
-    Dim diff As Double
-    Dim pos As Position
-    Dim syntheticId As String
-
-    For Each key In diffs.Keys
-        diff = diffs(key)
-
-        ' Only propose if discrepancy exceeds the threshold
-        If Abs(diff) >= threshold Then
-            ' Create a synthetic position representing the trade
-            Set pos = New Position
-            syntheticId = dimensionName & "::" & CStr(key)
-
-            pos.posID = syntheticId
-            pos.name = "Adjust " & dimensionName & " exposure to " & CStr(key)
-            pos.weight = diff ' Positive weight means Buy, Negative means Sell
-
-            tradesPort.positions.Add pos.posID, pos
-        End If
-    Next key
 End Sub
