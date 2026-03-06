@@ -39,9 +39,38 @@ Public Sub RunDailyReporting(portfolios As Dictionary, ws As Worksheet)
     Dim cashResult As Variant
     cashResult = CashReportsFactory.GenerateCashReport(portfolios)
 
-    ' 2. Export to PDF
-    Dim pdfPathComp As String
-    Dim pdfPathCash As String
+    ' 2. Write to Worksheet Named Ranges
+    Dim rComp As Range
+    Dim rCash As Range
+
+    On Error Resume Next
+    Set rComp = ws.Range("mandatesContraints")
+    Set rCash = ws.Range("CashVariations")
+    On Error GoTo 0
+
+    If Not rComp Is Nothing Then
+        ' Clear existing data but keep formatting (assuming header is in the named range or just above it)
+        rComp.CurrentRegion.ClearContents
+        If Not CommunFactory.isArrayEmpty(compResult(0)) Then
+            ' Write data starting at the named range cell
+            ws.Range(rComp.Cells(1, 1), rComp.Cells(UBound(compResult(0), 1), UBound(compResult(0), 2))).Value = compResult(0)
+        End If
+    Else
+        Debug.Print "Warning: Named range 'mandatesContraints' not found on Reports sheet."
+    End If
+
+    If Not rCash Is Nothing Then
+        rCash.CurrentRegion.ClearContents
+        If Not CommunFactory.isArrayEmpty(cashResult(0)) Then
+            ws.Range(rCash.Cells(1, 1), rCash.Cells(UBound(cashResult(0), 1), UBound(cashResult(0), 2))).Value = cashResult(0)
+        End If
+    Else
+        Debug.Print "Warning: Named range 'CashVariations' not found on Reports sheet."
+    End If
+
+
+    ' 3. Export to single PDF
+    Dim pdfPath As String
     Dim baseDir As String
     Dim fso As Object
 
@@ -52,63 +81,26 @@ Public Sub RunDailyReporting(portfolios As Dictionary, ws As Worksheet)
         fso.CreateFolder baseDir
     End If
 
-    pdfPathComp = baseDir & "\Compliance_Report_" & Format(Date, "YYYYMMDD") & ".pdf"
-    pdfPathCash = baseDir & "\Cash_Report_" & Format(Date, "YYYYMMDD") & ".pdf"
+    pdfPath = baseDir & "\Daily_Report_" & Format(Date, "YYYYMMDD") & ".pdf"
 
-    ' Export Compliance
-    If Not CommunFactory.isArrayEmpty(compResult(0)) Then
-        ExportArrayToPDF compResult(0), ws, pdfPathComp
-    End If
-
-    ' Export Cash
-    If Not CommunFactory.isArrayEmpty(cashResult(0)) Then
-        ExportArrayToPDF cashResult(0), ws, pdfPathCash
-    End If
-
-    ' 3. Create Email with Breaches
-    GenerateBreachEmail compResult(1), cashResult(1), pdfPathComp, pdfPathCash
-
-End Sub
-
-' Helper to write array to sheet and export as PDF
-Private Sub ExportArrayToPDF(dataArr As Variant, ws As Worksheet, filePath As String)
-
-    ws.Cells.Clear
-
-    Dim rCount As Long, cCount As Long
-    rCount = UBound(dataArr, 1) - LBound(dataArr, 1) + 1
-    cCount = UBound(dataArr, 2) - LBound(dataArr, 2) + 1
-
-    Dim targetRange As Range
-    Set targetRange = ws.Range(ws.Cells(1, 1), ws.Cells(rCount, cCount))
-
-    targetRange.Value = dataArr
-
-    ' Basic Formatting
-    targetRange.EntireColumn.AutoFit
-    targetRange.Rows(1).Font.Bold = True
-    targetRange.Borders.LineStyle = 1 ' xlContinuous
-
-    ' Export
+    ' Export the entire worksheet to PDF
     On Error Resume Next
-    ws.PageSetup.Orientation = 2 ' xlLandscape
-    ws.PageSetup.Zoom = False
-    ws.PageSetup.FitToPagesWide = 1
-    ws.PageSetup.FitToPagesTall = False
-
-    targetRange.ExportAsFixedFormat _
+    ws.ExportAsFixedFormat _
         Type:=0, _
-        Filename:=filePath, _
+        Filename:=pdfPath, _
         Quality:=0, _
         IncludeDocProperties:=True, _
         IgnorePrintAreas:=False, _
         OpenAfterPublish:=False
     On Error GoTo 0
 
+    ' 4. Create Email with Breaches
+    GenerateBreachEmail compResult(1), cashResult(1), pdfPath
+
 End Sub
 
 ' Helper to generate the email summarizing breaches
-Private Sub GenerateBreachEmail(compAlerts As Dictionary, cashAlerts As Dictionary, pdf1 As String, pdf2 As String)
+Private Sub GenerateBreachEmail(compAlerts As Dictionary, cashAlerts As Dictionary, pdfPath As String)
 
     Dim htmlBody As String
     htmlBody = "<html><body style='font-family: Arial, sans-serif;'>"
@@ -133,7 +125,7 @@ Private Sub GenerateBreachEmail(compAlerts As Dictionary, cashAlerts As Dictiona
         htmlBody = htmlBody & "<p style='color: green; font-weight: bold;'>All rules PASS. No breaches detected today.</p>"
     End If
 
-    htmlBody = htmlBody & "<br><p>Please find the full reports attached.</p>"
+    htmlBody = htmlBody & "<br><p>Please find the full report attached.</p>"
     htmlBody = htmlBody & "<p>Regards,<br>Risk & Compliance System</p>"
     htmlBody = htmlBody & "</body></html>"
 
@@ -152,11 +144,10 @@ Private Sub GenerateBreachEmail(compAlerts As Dictionary, cashAlerts As Dictiona
         .Subject = "Compliance Breaches - " & Format(Date, "YYYY-MM-DD")
         .htmlBody = htmlBody
 
-        ' Attach PDFs if they exist
+        ' Attach PDF if it exists
         Dim fso As Object
         Set fso = CreateObject("Scripting.FileSystemObject")
-        If fso.FileExists(pdf1) Then .Attachments.Add pdf1
-        If fso.FileExists(pdf2) Then .Attachments.Add pdf2
+        If fso.FileExists(pdfPath) Then .Attachments.Add pdfPath
 
         .Display ' Show the draft
     End With
