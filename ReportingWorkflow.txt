@@ -1,0 +1,203 @@
+Option Explicit
+
+' Entry point as requested by user (adapted to current codebase nomenclature)
+Public Sub MainReportingRoutine()
+
+    Dim config As Configuration
+    Set config = Data.GetConfiguration()
+
+    ' Assuming "Reports" is the sheet name intended for output.
+    ' If config doesn't have it, we fall back or create it.
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets("Reports")
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Worksheets.Add
+        ws.Name = "Reports"
+    End If
+    On Error GoTo 0
+
+    Dim portfolios As Dictionary
+    ' Assuming today's date for the report run
+    Set portfolios = Data.GetPortfolios(Date)
+
+    RunDailyReporting portfolios, ws
+
+End Sub
+
+' Core logic to generate, export, and email
+Public Sub RunDailyReporting(portfolios As Dictionary, ws As Worksheet)
+
+    If portfolios Is Nothing Then Exit Sub
+    If portfolios.count = 0 Then Exit Sub
+
+    ' 1. Generate Reports
+    Dim compResult As Variant
+    ' preTrade = False, use Date
+    compResult = ComplianceFactory.GenerateAggregatedComplianceReport(portfolios, False, Date)
+
+    Dim cashResult As Variant
+    cashResult = CashReportsFactory.GenerateCashReport(portfolios)
+
+    ' 2. Export to PDF
+    Dim pdfPathComp As String
+    Dim pdfPathCash As String
+    Dim baseDir As String
+    Dim fso As Object
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    baseDir = ThisWorkbook.path & "\Reports"
+
+    If Not fso.FolderExists(baseDir) Then
+        fso.CreateFolder baseDir
+    End If
+
+    pdfPathComp = baseDir & "\Compliance_Report_" & Format(Date, "YYYYMMDD") & ".pdf"
+    pdfPathCash = baseDir & "\Cash_Report_" & Format(Date, "YYYYMMDD") & ".pdf"
+
+    ' Export Compliance
+    If Not CommunFactory.isArrayEmpty(compResult(0)) Then
+        ExportArrayToPDF compResult(0), ws, pdfPathComp
+    End If
+
+    ' Export Cash
+    If Not CommunFactory.isArrayEmpty(cashResult(0)) Then
+        ExportArrayToPDF cashResult(0), ws, pdfPathCash
+    End If
+
+    ' 3. Create Email with Breaches
+    GenerateBreachEmail compResult(1), cashResult(1), pdfPathComp, pdfPathCash
+
+End Sub
+
+' Helper to write array to sheet and export as PDF
+Private Sub ExportArrayToPDF(dataArr As Variant, ws As Worksheet, filePath As String)
+
+    ws.Cells.Clear
+
+    Dim rCount As Long, cCount As Long
+    rCount = UBound(dataArr, 1) - LBound(dataArr, 1) + 1
+    cCount = UBound(dataArr, 2) - LBound(dataArr, 2) + 1
+
+    Dim targetRange As Range
+    Set targetRange = ws.Range(ws.Cells(1, 1), ws.Cells(rCount, cCount))
+
+    targetRange.Value = dataArr
+
+    ' Basic Formatting
+    targetRange.EntireColumn.AutoFit
+    targetRange.Rows(1).Font.Bold = True
+    targetRange.Borders.LineStyle = 1 ' xlContinuous
+
+    ' Export
+    On Error Resume Next
+    ws.PageSetup.Orientation = 2 ' xlLandscape
+    ws.PageSetup.Zoom = False
+    ws.PageSetup.FitToPagesWide = 1
+    ws.PageSetup.FitToPagesTall = False
+
+    targetRange.ExportAsFixedFormat _
+        Type:=0, _
+        Filename:=filePath, _
+        Quality:=0, _
+        IncludeDocProperties:=True, _
+        IgnorePrintAreas:=False, _
+        OpenAfterPublish:=False
+    On Error GoTo 0
+
+End Sub
+
+' Helper to generate the email summarizing breaches
+Private Sub GenerateBreachEmail(compAlerts As Dictionary, cashAlerts As Dictionary, pdf1 As String, pdf2 As String)
+
+    Dim htmlBody As String
+    htmlBody = "<html><body style='font-family: Arial, sans-serif;'>"
+    htmlBody = htmlBody & "<h2>Daily Compliance & Cash Report - " & Format(Date, "DD MMM YYYY") & "</h2>"
+
+    Dim hasBreaches As Boolean
+    hasBreaches = False
+
+    htmlBody = htmlBody & "<h3>Current Breaches</h3>"
+    htmlBody = htmlBody & "<table border='1' style='border-collapse: collapse; width: 80%;'>"
+    htmlBody = htmlBody & "<tr style='background-color: #f2f2f2;'><th style='padding: 8px; text-align: left;'>Portfolio</th><th style='padding: 8px; text-align: left;'>Rule</th><th style='padding: 8px; text-align: right;'>Exposure</th><th style='padding: 8px; text-align: right;'>Limit</th></tr>"
+
+    ' Helper function to append rows to HTML table
+    hasBreaches = AppendBreachRowsToHTML(htmlBody, compAlerts) Or hasBreaches
+    hasBreaches = AppendBreachRowsToHTML(htmlBody, cashAlerts) Or hasBreaches
+
+    htmlBody = htmlBody & "</table>"
+
+    If Not hasBreaches Then
+        htmlBody = "<html><body style='font-family: Arial, sans-serif;'>"
+        htmlBody = htmlBody & "<h2>Daily Compliance & Cash Report - " & Format(Date, "DD MMM YYYY") & "</h2>"
+        htmlBody = htmlBody & "<p style='color: green; font-weight: bold;'>All rules PASS. No breaches detected today.</p>"
+    End If
+
+    htmlBody = htmlBody & "<br><p>Please find the full reports attached.</p>"
+    htmlBody = htmlBody & "<p>Regards,<br>Risk & Compliance System</p>"
+    htmlBody = htmlBody & "</body></html>"
+
+    ' Generate Email via Outlook
+    On Error Resume Next
+    Dim outApp As Object
+    Dim outMail As Object
+    Set outApp = CreateObject("Outlook.Application")
+    If outApp Is Nothing Then
+        MsgBox "Cannot open Outlook to generate the report email.", vbExclamation
+        Exit Sub
+    End If
+
+    Set outMail = outApp.CreateItem(0) ' olMailItem
+    With outMail
+        .Subject = "Compliance Breaches - " & Format(Date, "YYYY-MM-DD")
+        .htmlBody = htmlBody
+
+        ' Attach PDFs if they exist
+        Dim fso As Object
+        Set fso = CreateObject("Scripting.FileSystemObject")
+        If fso.FileExists(pdf1) Then .Attachments.Add pdf1
+        If fso.FileExists(pdf2) Then .Attachments.Add pdf2
+
+        .Display ' Show the draft
+    End With
+    On Error GoTo 0
+
+End Sub
+
+' Helper to extract BREACH dictionary and format as HTML rows
+Private Function AppendBreachRowsToHTML(ByRef htmlBody As String, alertsDict As Dictionary) As Boolean
+
+    AppendBreachRowsToHTML = False
+
+    If alertsDict Is Nothing Then Exit Function
+    If Not alertsDict.Exists("BREACH") Then Exit Function
+
+    Dim breaches As Dictionary
+    Set breaches = alertsDict("BREACH")
+
+    If breaches.count = 0 Then Exit Function
+
+    Dim portName As Variant
+    Dim ruleName As Variant
+    Dim ruleData As Variant
+
+    For Each portName In breaches
+        Dim rulesDict As Dictionary
+        Set rulesDict = breaches(portName)
+
+        For Each ruleName In rulesDict
+            ruleData = rulesDict(ruleName)
+            ' ruleData(0) is Exposure, ruleData(1) is Limit
+
+            htmlBody = htmlBody & "<tr>"
+            htmlBody = htmlBody & "<td style='padding: 8px; color: #d9534f; font-weight: bold;'>" & portName & "</td>"
+            htmlBody = htmlBody & "<td style='padding: 8px;'>" & ruleName & "</td>"
+            htmlBody = htmlBody & "<td style='padding: 8px; text-align: right;'>" & Format(ruleData(0), "0.00%") & "</td>"
+            htmlBody = htmlBody & "<td style='padding: 8px; text-align: right;'>" & Format(ruleData(1), "0.00%") & "</td>"
+            htmlBody = htmlBody & "</tr>"
+
+            AppendBreachRowsToHTML = True
+        Next ruleName
+    Next portName
+
+End Function
