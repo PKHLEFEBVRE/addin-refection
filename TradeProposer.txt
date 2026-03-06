@@ -20,13 +20,13 @@ Public Function ProposeTradesAsPortfolio(target As Portfolio, bench As Portfolio
     ' Negative exposure means Target < Benchmark (Underweight -> Need to Buy)
 
     Dim assetClassDiffs As Dictionary
-    Set assetClassDiffs = PositionsReportsFactory.GetExposure(diffPort, "assetClass")
+    Set assetClassDiffs = CalculateExposure(diffPort, "assetClass")
 
     Dim geoDiffs As Dictionary
-    Set geoDiffs = PositionsReportsFactory.GetExposure(diffPort, "geography")
+    Set geoDiffs = CalculateExposure(diffPort, "geography")
 
     Dim catDiffs As Dictionary
-    Set catDiffs = PositionsReportsFactory.GetExposure(diffPort, "category")
+    Set catDiffs = CalculateExposure(diffPort, "category")
 
     ' 3. Find the single largest discrepancy across all three dimensions
     Dim maxDiff As Double
@@ -91,14 +91,54 @@ Public Function ProposeTradesAsPortfolio(target As Portfolio, bench As Portfolio
     Set ProposeTradesAsPortfolio = tradesPort
 End Function
 
+Private Function CalculateExposure(port As Portfolio, propertyName As String) As Dictionary
+    Dim exp As New Dictionary
+    Dim posKey As Variant
+    Dim pos As Position
+    Dim inst As Instrument
+    Dim propValue As String
+    Dim weight As Double
+
+    If port.positions Is Nothing Then
+        Set CalculateExposure = exp
+        Exit Function
+    End If
+
+    For Each posKey In port.positions.Keys
+        Set pos = port.positions(posKey)
+        Set inst = pos.posInstrument
+        propValue = "N/A"
+        weight = pos.weight
+
+        ' Retrieve property value dynamically from Instrument
+        If Not inst Is Nothing Then
+            On Error Resume Next
+            propValue = CStr(CallByName(inst, propertyName, VbGet))
+            If Err.Number <> 0 Then propValue = "N/A"
+            On Error GoTo 0
+        End If
+
+        ' Only aggregate valid dimensions
+        If propValue <> "N/A" And propValue <> "" Then
+            If exp.Exists(propValue) Then
+                exp(propValue) = exp(propValue) + weight
+            Else
+                exp.Add propValue, weight
+            End If
+        End If
+    Next posKey
+
+    Set CalculateExposure = exp
+End Function
+
 Public Sub GenerateAndEmailProposals(portfolios As Dictionary, Optional emailTo As String = "")
-    ' Iterates through all portfolios, computes benchmarks, finds the largest trade proposals,
+    ' Iterates through all portfolios, gets their benchmarks, finds the largest trade proposals,
     ' formats them into an HTML table, and sends an email via Outlook.
 
     Dim htmlBody As String
     Dim portKey As Variant
     Dim targetPortfolio As Portfolio
-    Dim benchDict As Dictionary
+    Dim bench As Portfolio
     Dim tradesPort As Portfolio
     Dim posKey As Variant
     Dim tradePos As Position
@@ -111,7 +151,7 @@ Public Sub GenerateAndEmailProposals(portfolios As Dictionary, Optional emailTo 
     ' Construct HTML Header
     htmlBody = "<html><body style='font-family: Arial, sans-serif;'>"
     htmlBody = htmlBody & "<h2>Benchmark Trade Proposals</h2>"
-    htmlBody = htmlBody & "<p>The following table lists the single largest recommended trade (>3% discrepancy) to align each portfolio with its computed benchmark.</p>"
+    htmlBody = htmlBody & "<p>The following table lists the single largest recommended trade (>3% discrepancy) to align each portfolio with its composition benchmark.</p>"
     htmlBody = htmlBody & "<table border='1' cellpadding='5' cellspacing='0' style='border-collapse: collapse;'>"
     htmlBody = htmlBody & "<tr style='background-color: #f2f2f2;'>"
     htmlBody = htmlBody & "<th>Portfolio Name</th>"
@@ -125,11 +165,25 @@ Public Sub GenerateAndEmailProposals(portfolios As Dictionary, Optional emailTo 
     For Each portKey In portfolios.Keys
         Set targetPortfolio = portfolios(portKey)
 
-        ' Compute benchmark (with optional time adjustment true/false - assume False here or pass as arg)
+        ' Retrieve benchmark from portfolio dictionary (do not compute)
         On Error Resume Next
-        Set benchDict = BenchmarkFactory.ComputeBenchmark(targetPortfolio, True) ' Enable time adjustment by default for proposals
-        If Err.Number = 0 And Not benchDict Is Nothing Then
-            Set tradesPort = benchDict("trades")
+        Set bench = Nothing
+        If Not targetPortfolio.benchmark Is Nothing Then
+            If targetPortfolio.benchmark.Exists("composition") Then
+                Set bench = targetPortfolio.benchmark("composition")
+            End If
+        End If
+        On Error GoTo 0
+
+        If Not bench Is Nothing Then
+            Set tradesPort = ProposeTradesAsPortfolio(targetPortfolio, bench)
+
+            ' Save trades to benchmark dictionary
+            If targetPortfolio.benchmark.Exists("trades") Then
+                Set targetPortfolio.benchmark("trades") = tradesPort
+            Else
+                targetPortfolio.benchmark.Add "trades", tradesPort
+            End If
 
             ' If there's a trade proposal
             If Not tradesPort Is Nothing Then
@@ -175,9 +229,8 @@ Public Sub GenerateAndEmailProposals(portfolios As Dictionary, Optional emailTo 
                 End If
             End If
         Else
-            Debug.Print "Error computing benchmark for " & targetPortfolio.Name & ": " & Err.Description
+            Debug.Print "Warning: 'composition' benchmark not found for portfolio " & targetPortfolio.Name
         End If
-        On Error GoTo 0
     Next portKey
 
     ' Finish HTML

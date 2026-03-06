@@ -23,6 +23,7 @@ Public CashAndTreso As Double
 Public AUM As Double
 Public exposureLimits As Dictionary
 Public positions As Dictionary
+Public benchmark As Dictionary
 
 Private m_equityDelta As Double
 Private m_equityDeltaComputed As Boolean
@@ -31,6 +32,7 @@ Private Sub Class_Initialize()
 
     Set exposureLimits = New Dictionary
     Set positions = New Dictionary
+    Set benchmark = New Dictionary
     m_equityDeltaComputed = False
 
 End Sub
