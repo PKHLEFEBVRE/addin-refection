@@ -53,7 +53,7 @@ Public Function GenerateComplianceReport(port As Portfolio, preTrade As Boolean,
 
 End Function
 
-' Generates a consolidated matrix report for all portfolios
+' Generates a consolidated matrix report for all portfolios and a dictionary of alerts
 Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary, preTrade As Boolean, Optional dt As Date = 0) As Variant
 
     If dt = 0 Then dt = Date ' Default to today if not provided
@@ -61,6 +61,10 @@ Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary, pre
     Dim pKey As Variant
     Dim port As Portfolio
     Dim ruleKey As Variant
+
+    Dim alertsDict As New Dictionary
+    alertsDict.Add "BREACH", New Dictionary
+    alertsDict.Add "WARNING", New Dictionary
 
     ' 0. Filter portfolios based on preTrade flag to avoid repeated checks
     Dim filteredPortfolios As New Dictionary
@@ -78,7 +82,7 @@ Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary, pre
     Next pKey
 
     If filteredPortfolios.count = 0 Then
-        GenerateAggregatedComplianceReport = Array()
+        GenerateAggregatedComplianceReport = Array(Array(), alertsDict)
         Exit Function
     End If
 
@@ -96,7 +100,7 @@ Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary, pre
     Next pKey
 
     If uniqueRules.count = 0 Then
-        GenerateAggregatedComplianceReport = Array()
+        GenerateAggregatedComplianceReport = Array(Array(), alertsDict)
         Exit Function
     End If
 
@@ -120,11 +124,13 @@ Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary, pre
         c = c + 3
     Next rKey
 
-    ' 3. Populate Data
+    ' 3. Populate Data and Alerts
     Dim r As Long: r = 2
     Dim res As Variant
     Dim limitBreach As Double
     Dim dictToUse As Dictionary
+    Dim statusStr As String
+    Dim expValue As Double
 
     For Each pKey In filteredPortfolios
         Set port = filteredPortfolios(pKey)
@@ -146,9 +152,20 @@ Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary, pre
                     res = EvaluateSingleRule(port, dictToUse, CStr(rKey), limitBreach)
 
                     If Not IsEmpty(res) Then
-                        report(r, c) = res(2)     ' Exposure
-                        report(r, c + 1) = res(4) ' Breach Limit
-                        report(r, c + 2) = res(5) ' Status
+                        expValue = res(2)
+                        statusStr = res(5)
+
+                        report(r, c) = expValue     ' Exposure
+                        report(r, c + 1) = limitBreach ' Breach Limit
+                        report(r, c + 2) = statusStr ' Status
+
+                        ' Update Alerts Dictionary
+                        If statusStr = "BREACH" Or statusStr = "WARNING" Then
+                            If Not alertsDict(statusStr).Exists(port.Name) Then
+                                alertsDict(statusStr).Add port.Name, New Dictionary
+                            End If
+                            alertsDict(statusStr)(port.Name).Add rKey, Array(expValue, limitBreach)
+                        End If
                     Else
                         report(r, c) = "Err"
                         report(r, c + 1) = "Err"
@@ -168,7 +185,7 @@ Public Function GenerateAggregatedComplianceReport(portfolios As Dictionary, pre
         r = r + 1
     Next pKey
 
-    GenerateAggregatedComplianceReport = report
+    GenerateAggregatedComplianceReport = Array(report, alertsDict)
 End Function
 
 

@@ -1,15 +1,19 @@
 Option Explicit
 
-' Generates an aggregated Cash Report for all portfolios
+' Generates an aggregated Cash Report for all portfolios and an alerts dictionary
 Public Function GenerateCashReport(portfolios As Dictionary) As Variant
 
+    Dim alertsDict As New Dictionary
+    alertsDict.Add "BREACH", New Dictionary
+    alertsDict.Add "WARNING", New Dictionary
+
     If portfolios Is Nothing Then
-        GenerateCashReport = Array()
+        GenerateCashReport = Array(Array(), alertsDict)
         Exit Function
     End If
 
     If portfolios.count = 0 Then
-        GenerateCashReport = Array()
+        GenerateCashReport = Array(Array(), alertsDict)
         Exit Function
     End If
 
@@ -89,12 +93,14 @@ Public Function GenerateCashReport(portfolios As Dictionary) As Variant
             End If
         End If
 
-        ' 3. Populate Report Row
+        ' 3. Populate Report Row and Alerts
         report(r, 1) = port.Name
 
         report(r, 2) = baseCashSum
         If baseCashSum < baseCashLimit Then
             report(r, 3) = "BREACH"
+            If Not alertsDict("BREACH").Exists(port.Name) Then alertsDict("BREACH").Add port.Name, New Dictionary
+            alertsDict("BREACH")(port.Name).Add "Base Cash Min", Array(baseCashSum, baseCashLimit)
         Else
             report(r, 3) = "PASS"
         End If
@@ -103,6 +109,8 @@ Public Function GenerateCashReport(portfolios As Dictionary) As Variant
         report(r, 5) = totalCashLimit
         If totalCashSum > totalCashLimit Then
             report(r, 6) = "BREACH"
+            If Not alertsDict("BREACH").Exists(port.Name) Then alertsDict("BREACH").Add port.Name, New Dictionary
+            alertsDict("BREACH")(port.Name).Add "Total Cash Max", Array(totalCashSum, totalCashLimit)
         Else
             report(r, 6) = "PASS"
         End If
@@ -110,6 +118,6 @@ Public Function GenerateCashReport(portfolios As Dictionary) As Variant
         r = r + 1
     Next pKey
 
-    GenerateCashReport = report
+    GenerateCashReport = Array(report, alertsDict)
 
 End Function
