@@ -2,7 +2,7 @@ Option Explicit
 
 Public Function ProposeTradesAsPortfolio(target As Portfolio, bench As Portfolio) As Portfolio
     ' Generate actionable trade proposals to align a target portfolio with its benchmark.
-    ' Focuses on the single largest discrepancy (> 3%) across Asset Class, Geography, and Category.
+    ' Focuses on the single largest discrepancy (> 3%) across the intersection of Asset Class and Category.
     ' Returns a Portfolio containing a synthetic Position representing the required trade.
 
     Dim tradesPort As New Portfolio
@@ -15,75 +15,62 @@ Public Function ProposeTradesAsPortfolio(target As Portfolio, bench As Portfolio
     Dim diffPort As Portfolio
     Set diffPort = PortfolioFactory.CreateDiffPortfolio(target, bench)
 
-    ' 2. Calculate exposures of the difference portfolio
+    ' 2. Calculate exposures of the difference portfolio (Intersection of Asset Class and Category)
     ' Positive exposure means Target > Benchmark (Overweight -> Need to Sell)
     ' Negative exposure means Target < Benchmark (Underweight -> Need to Buy)
 
-    Dim assetClassDiffs As Dictionary
-    Set assetClassDiffs = CalculateExposure(diffPort, "assetClass")
+    Dim intersectionDiffs As Dictionary
+    Set intersectionDiffs = PositionsReportsFactory.GetExposure(diffPort, "assetClass", "category")
 
-    Dim geoDiffs As Dictionary
-    Set geoDiffs = CalculateExposure(diffPort, "geography")
-
-    Dim catDiffs As Dictionary
-    Set catDiffs = CalculateExposure(diffPort, "category")
-
-    ' 3. Find the single largest discrepancy across all three dimensions
+    ' 3. Find the single largest discrepancy across the intersection keys
     Dim maxDiff As Double
-    Dim maxDimension As String
     Dim maxKey As String
     Dim key As Variant
     Dim diff As Double
 
     maxDiff = 0
-    maxDimension = ""
     maxKey = ""
 
-    ' Check Asset Class
-    For Each key In assetClassDiffs.Keys
-        diff = assetClassDiffs(key)
+    For Each key In intersectionDiffs.Keys
+        diff = intersectionDiffs(key)
         If Abs(diff) > Abs(maxDiff) Then
             maxDiff = diff
-            maxDimension = "AssetClass"
-            maxKey = CStr(key)
-        End If
-    Next key
-
-    ' Check Geography
-    For Each key In geoDiffs.Keys
-        diff = geoDiffs(key)
-        If Abs(diff) > Abs(maxDiff) Then
-            maxDiff = diff
-            maxDimension = "Geography"
-            maxKey = CStr(key)
-        End If
-    Next key
-
-    ' Check Category
-    For Each key In catDiffs.Keys
-        diff = catDiffs(key)
-        If Abs(diff) > Abs(maxDiff) Then
-            maxDiff = diff
-            maxDimension = "Category"
             maxKey = CStr(key)
         End If
     Next key
 
     ' 4. Generate the single proposal if it exceeds the threshold
     ' Note: diff is Target - Benchmark.
-    ' To align target with benchmark, the trade weight is -diff.
+    ' To align target with benchmark, the trade weight is -maxDiff.
     Dim tradeWeight As Double
     tradeWeight = -maxDiff
 
     If Abs(tradeWeight) >= threshold Then
         Dim pos As New Position
-        Dim syntheticId As String
+        Dim targetInst As Instrument
+        Dim targetId As String
+        Dim targetName As String
 
-        syntheticId = maxDimension & "::" & maxKey
+        ' Find the most prominent security to trade in this intersection
+        If tradeWeight > 0 Then
+            ' Need to Buy: Find the biggest security in the benchmark matching the key
+            FindProminentSecurity bench, maxKey, targetId, targetName, targetInst
+        Else
+            ' Need to Sell: Find the biggest security in the target portfolio matching the key
+            FindProminentSecurity target, maxKey, targetId, targetName, targetInst
+        End If
 
-        pos.posID = syntheticId
-        pos.name = "Adjust " & maxDimension & " exposure to " & maxKey
+        ' If a security couldn't be found (unlikely but possible), use a placeholder
+        If targetId = "" Then
+            targetId = "N/A"
+            targetName = "Generic " & maxKey
+        End If
+
+        pos.posID = targetId
+        pos.name = targetName
         pos.weight = tradeWeight ' Positive weight means Buy, Negative means Sell
+        pos.account = maxKey ' Store the intersection key for email reporting
+        Set pos.posInstrument = targetInst
 
         tradesPort.positions.Add pos.posID, pos
     End If
@@ -91,45 +78,52 @@ Public Function ProposeTradesAsPortfolio(target As Portfolio, bench As Portfolio
     Set ProposeTradesAsPortfolio = tradesPort
 End Function
 
-Private Function CalculateExposure(port As Portfolio, propertyName As String) As Dictionary
-    Dim exp As New Dictionary
+Private Sub FindProminentSecurity(port As Portfolio, intersectionKey As String, ByRef outId As String, ByRef outName As String, ByRef outInst As Instrument)
     Dim posKey As Variant
     Dim pos As Position
     Dim inst As Instrument
-    Dim propValue As String
-    Dim weight As Double
+    Dim val1 As String, val2 As String
+    Dim compositeKey As String
+    Dim maxWeight As Double
 
-    If port.positions Is Nothing Then
-        Set CalculateExposure = exp
-        Exit Function
-    End If
+    maxWeight = 0
+    outId = ""
+    outName = ""
+    Set outInst = Nothing
+
+    If port.positions Is Nothing Then Exit Sub
 
     For Each posKey In port.positions.Keys
         Set pos = port.positions(posKey)
         Set inst = pos.posInstrument
-        propValue = "N/A"
-        weight = pos.weight
 
-        ' Retrieve property value dynamically from Instrument
+        val1 = "N/A"
+        val2 = "N/A"
+
         If Not inst Is Nothing Then
             On Error Resume Next
-            propValue = CStr(CallByName(inst, propertyName, VbGet))
-            If Err.Number <> 0 Then propValue = "N/A"
+            val1 = CStr(CallByName(inst, "assetClass", VbGet))
+            If Err.Number <> 0 Then val1 = "N/A"
+            Err.Clear
+
+            val2 = CStr(CallByName(inst, "category", VbGet))
+            If Err.Number <> 0 Then val2 = "N/A"
+            Err.Clear
             On Error GoTo 0
         End If
 
-        ' Only aggregate valid dimensions
-        If propValue <> "N/A" And propValue <> "" Then
-            If exp.Exists(propValue) Then
-                exp(propValue) = exp(propValue) + weight
-            Else
-                exp.Add propValue, weight
+        compositeKey = val1 & "|" & val2
+
+        If compositeKey = intersectionKey Then
+            If Abs(pos.weight) > maxWeight Then
+                maxWeight = Abs(pos.weight)
+                outId = pos.posID
+                outName = pos.name
+                Set outInst = inst
             End If
         End If
     Next posKey
-
-    Set CalculateExposure = exp
-End Function
+End Sub
 
 Public Sub GenerateAndEmailProposals(portfolios As Dictionary, Optional emailTo As String = "")
     ' Iterates through all portfolios, gets their benchmarks, finds the largest trade proposals,
@@ -157,8 +151,9 @@ Public Sub GenerateAndEmailProposals(portfolios As Dictionary, Optional emailTo 
     htmlBody = htmlBody & "<th>Portfolio Name</th>"
     htmlBody = htmlBody & "<th>Action</th>"
     htmlBody = htmlBody & "<th>Weight to Adjust</th>"
-    htmlBody = htmlBody & "<th>Dimension</th>"
-    htmlBody = htmlBody & "<th>Value</th>"
+    htmlBody = htmlBody & "<th>Asset Class | Category</th>"
+    htmlBody = htmlBody & "<th>Security ID</th>"
+    htmlBody = htmlBody & "<th>Security Name</th>"
     htmlBody = htmlBody & "</tr>"
 
     ' Process Portfolios
@@ -203,27 +198,14 @@ Public Sub GenerateAndEmailProposals(portfolios As Dictionary, Optional emailTo 
                             actionColor = "red"
                         End If
 
-                        ' Parse posID (e.g., "AssetClass::Equity")
-                        Dim dimensionParts() As String
-                        dimensionParts = Split(tradePos.posID, "::")
-                        Dim dimensionName As String
-                        Dim dimensionValue As String
-
-                        If UBound(dimensionParts) = 1 Then
-                            dimensionName = dimensionParts(0)
-                            dimensionValue = dimensionParts(1)
-                        Else
-                            dimensionName = "Unknown"
-                            dimensionValue = tradePos.posID
-                        End If
-
                         ' Add row
                         htmlBody = htmlBody & "<tr>"
                         htmlBody = htmlBody & "<td>" & targetPortfolio.Name & "</td>"
                         htmlBody = htmlBody & "<td style='color:" & actionColor & "; font-weight:bold;'>" & action & "</td>"
                         htmlBody = htmlBody & "<td>" & Format(Abs(tradePos.weight), "0.00%") & "</td>"
-                        htmlBody = htmlBody & "<td>" & dimensionName & "</td>"
-                        htmlBody = htmlBody & "<td>" & dimensionValue & "</td>"
+                        htmlBody = htmlBody & "<td>" & tradePos.account & "</td>" ' intersection key stored in account
+                        htmlBody = htmlBody & "<td>" & tradePos.posID & "</td>"
+                        htmlBody = htmlBody & "<td>" & tradePos.name & "</td>"
                         htmlBody = htmlBody & "</tr>"
                     Next posKey
                 End If
