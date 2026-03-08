@@ -1,0 +1,181 @@
+Option Explicit
+
+' Proposes a trade to match the benchmark weight of a specifically selected ISIN
+' Automatically handles cash buffer and Money Market funding if required.
+Public Function ProposeSingleLineTrade(port As Portfolio, bench As Portfolio, selectedISIN As String) As Dictionary
+
+    Dim proposedTrades As New Dictionary
+
+    Dim bPos As Position
+    Dim pPos As Position
+    Dim targetWeight As Double: targetWeight = 0
+    Dim currentWeight As Double: currentWeight = 0
+    Dim tradeWeight As Double
+    Dim tradeAmount As Double
+
+    Dim config As Configuration
+    Set config = Data.GetConfiguration()
+
+    ' 1. Find Target Weight in Benchmark
+    If Not bench.positions Is Nothing Then
+        ' Note: benchmarking logic sometimes uses InfinID, sometimes ISIN as the Dictionary key.
+        ' We iterate to be safe and match by the actual ISIN property.
+        Dim bKey As Variant
+        For Each bKey In bench.positions
+            If bench.positions(bKey).isin = selectedISIN Then
+                Set bPos = bench.positions(bKey)
+                targetWeight = bPos.weight
+                Exit For
+            End If
+        Next bKey
+    End If
+
+    If bPos Is Nothing Then
+        MsgBox "The selected ISIN was not found in the Benchmark.", vbExclamation
+        Set ProposeSingleLineTrade = proposedTrades
+        Exit Function
+    End If
+
+    ' 2. Find Current Weight in Portfolio
+    If Not port.positions Is Nothing Then
+        Dim pKey As Variant
+        For Each pKey In port.positions
+            If port.positions(pKey).isin = selectedISIN Then
+                Set pPos = port.positions(pKey)
+                currentWeight = pPos.weight
+                Exit For
+            End If
+        Next pKey
+    End If
+
+    ' 3. Calculate Trade Amount
+    tradeWeight = targetWeight - currentWeight
+
+    If Abs(tradeWeight) < 0.0001 Then
+        ' Negligible difference, no trade needed
+        Set ProposeSingleLineTrade = proposedTrades
+        Exit Function
+    End If
+
+    tradeAmount = tradeWeight * port.AUM
+
+    ' 4. Create Asset Trade Position
+    Dim assetTrade As Position
+    If Not pPos Is Nothing Then
+        ' Base trade on existing position to inherit CCY, FX, etc.
+        Set assetTrade = pPos.Clone()
+    Else
+        ' Base trade on benchmark position if we don't own it yet
+        Set assetTrade = bPos.Clone()
+        assetTrade.account = port.Name ' Align with our portfolio
+    End If
+
+    ' Calculate exact Quantity needed
+    Dim priceFactor As Double
+    If Not assetTrade.posInstrument Is Nothing Then
+        priceFactor = assetTrade.posInstrument.lastClose * assetTrade.fx
+        If assetTrade.posInstrument.quoteInPct Then priceFactor = priceFactor / 100
+    Else
+        ' Fallback to position data if instrument referential is missing
+        priceFactor = assetTrade.price * assetTrade.fx * assetTrade.quoteInPct
+    End If
+
+    If priceFactor = 0 Then
+        MsgBox "Cannot calculate quantity: price or fx is zero for " & selectedISIN, vbCritical
+        Set ProposeSingleLineTrade = proposedTrades
+        Exit Function
+    End If
+
+    assetTrade.qty = tradeAmount / priceFactor
+    assetTrade.amountBaseCur = tradeAmount
+    assetTrade.weight = tradeWeight
+
+    proposedTrades.Add assetTrade.posID, assetTrade
+
+    ' 5. Handle Funding (Only if Buying)
+    If tradeAmount > 0 Then
+
+        Dim cashPos As Position
+        Dim baseCashKey As Variant
+
+        ' Find Base Cash (where pos.ccy = port.ccy, usually posID is the CCY code or "10")
+        Dim isCashLine As Boolean
+        For Each pKey In port.positions
+            If UCase(Trim(port.positions(pKey).ccy)) = UCase(Trim(port.ccy)) Then
+                isCashLine = False
+                If port.positions(pKey).posID = "10" Then
+                    isCashLine = True
+                ElseIf Not port.positions(pKey).posInstrument Is Nothing Then
+                    If LCase(Trim(port.positions(pKey).posInstrument.category)) = "cash" Then
+                        isCashLine = True
+                    End If
+                End If
+
+                If isCashLine Then
+                    Set cashPos = port.positions(pKey)
+                    Exit For
+                End If
+            End If
+        Next pKey
+
+        Dim currentCash As Double: currentCash = 0
+        If Not cashPos Is Nothing Then currentCash = cashPos.amountBaseCur
+
+        ' Require a 0.4% buffer to avoid overdraft
+        Dim requiredBuffer As Double
+        requiredBuffer = port.AUM * 0.004
+
+        Dim availableCash As Double
+        availableCash = currentCash - requiredBuffer
+
+        If availableCash < tradeAmount Then
+            ' Shortfall! Need to sell Money Market fund
+            Dim shortfall As Double
+            shortfall = tradeAmount
+            If availableCash > 0 Then shortfall = tradeAmount - availableCash
+
+            Dim mmPos As Position
+            Dim mmISIN As String
+            mmISIN = config.globalMoneyMarketISIN
+
+            For Each pKey In port.positions
+                If port.positions(pKey).isin = mmISIN Then
+                    Set mmPos = port.positions(pKey)
+                    Exit For
+                End If
+            Next pKey
+
+            If mmPos Is Nothing Then
+                MsgBox "Insufficient cash and no Money Market fund (" & mmISIN & ") found to fund this trade.", vbCritical, "Funding Error"
+                ' Still return the asset trade, but user is warned
+            Else
+                If mmPos.amountBaseCur < shortfall Then
+                    MsgBox "Warning: Selling ALL Money Market fund, but still short by " & Format(shortfall - mmPos.amountBaseCur, "#,##0") & " " & port.ccy, vbExclamation, "Funding Warning"
+                    shortfall = mmPos.amountBaseCur ' Sell maximum available
+                End If
+
+                Dim mmTrade As Position
+                Set mmTrade = mmPos.Clone()
+
+                Dim mmPriceFactor As Double
+                If Not mmTrade.posInstrument Is Nothing Then
+                    mmPriceFactor = mmTrade.posInstrument.lastClose * mmTrade.fx
+                    If mmTrade.posInstrument.quoteInPct Then mmPriceFactor = mmPriceFactor / 100
+                Else
+                    mmPriceFactor = mmTrade.price * mmTrade.fx * mmTrade.quoteInPct
+                End If
+
+                If mmPriceFactor > 0 Then
+                    mmTrade.qty = -shortfall / mmPriceFactor
+                    mmTrade.amountBaseCur = -shortfall
+                    mmTrade.weight = -shortfall / port.AUM
+                    proposedTrades.Add mmTrade.posID & "_FUNDING", mmTrade
+                End If
+            End If
+        End If
+
+    End If
+
+    Set ProposeSingleLineTrade = proposedTrades
+
+End Function

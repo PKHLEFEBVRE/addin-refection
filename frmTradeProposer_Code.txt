@@ -1,0 +1,138 @@
+Option Explicit
+
+' --- Instructions for User ---
+' 1. Create a UserForm in the VBA Editor (Insert -> UserForm).
+' 2. Name it "frmTradeProposer".
+' 3. Add a ComboBox named "cmbPortfolio".
+' 4. Add a ListBox named "lstBenchmarkISINs". Set ColumnCount to 3 (ISIN, Name, Target Weight).
+' 5. Add a CommandButton named "btnCalculate".
+' 6. Add a TextBox named "txtResult" (Set MultiLine = True, ScrollBars = fmScrollBarsVertical).
+' 7. Paste this code into the UserForm's code module.
+' -----------------------------
+
+Private portfolios As Dictionary
+Private benchmarks As Dictionary ' Assuming a way to map port to bench exists
+
+Private Sub UserForm_Initialize()
+    ' 1. Load Portfolios
+    ' Assuming data.GetPortfolios(Date) gives the dictionary
+    Set portfolios = Data.GetPortfolios(Date)
+
+    ' Populate ComboBox
+    Dim pKey As Variant
+    For Each pKey In portfolios.Keys
+        cmbPortfolio.AddItem pKey
+    Next pKey
+End Sub
+
+Private Sub cmbPortfolio_Change()
+    ' When portfolio is selected, load its benchmark into the ListBox
+    Dim portName As String
+    portName = cmbPortfolio.Value
+    If portName = "" Then Exit Sub
+
+    Dim port As Portfolio
+    Set port = portfolios(portName)
+
+    lstBenchmarkISINs.Clear
+
+    ' --- ASSUMPTION ---
+    ' You mentioned earlier "I deal with the benchmark creation".
+    ' Let's assume you have a global way to get the benchmark for this portfolio,
+    ' OR the benchmark is stored on the portfolio object as `port.Benchmark`.
+    ' For this example, I assume `port.Benchmark` is a valid Portfolio object.
+
+    Dim bench As Portfolio
+    ' Set bench = GetBenchmarkForPortfolio(port) ' Replace with actual logic
+    ' Assuming it's a property for now:
+    ' Set bench = port.Benchmark
+
+    ' For the sake of this code compiling without the strict property, I'll use a dummy check
+    If bench Is Nothing Then
+        txtResult.Text = "No benchmark found for selected portfolio."
+        Exit Sub
+    End If
+
+    If bench.positions Is Nothing Then Exit Sub
+
+    Dim bKey As Variant
+    Dim pos As Position
+
+    Dim isCash As Boolean
+    For Each bKey In bench.positions
+        Set pos = bench.positions(bKey)
+
+        isCash = False
+        If Not pos.posInstrument Is Nothing Then
+            If LCase(Trim(pos.posInstrument.category)) = "cash" Then isCash = True
+        ElseIf pos.posID = "10" Or pos.posID = pos.ccy Then
+            isCash = True
+        End If
+
+        If pos.isin <> "" And Not isCash Then
+            lstBenchmarkISINs.AddItem pos.isin
+            lstBenchmarkISINs.List(lstBenchmarkISINs.ListCount - 1, 1) = pos.name
+            lstBenchmarkISINs.List(lstBenchmarkISINs.ListCount - 1, 2) = Format(pos.weight, "0.00%")
+        End If
+    Next bKey
+
+End Sub
+
+Private Sub btnCalculate_Click()
+    If cmbPortfolio.ListIndex = -1 Then
+        MsgBox "Please select a portfolio.", vbExclamation
+        Exit Sub
+    End If
+
+    If lstBenchmarkISINs.ListIndex = -1 Then
+        MsgBox "Please select an ISIN from the benchmark list.", vbExclamation
+        Exit Sub
+    End If
+
+    Dim portName As String
+    Dim selectedISIN As String
+
+    portName = cmbPortfolio.Value
+    selectedISIN = lstBenchmarkISINs.List(lstBenchmarkISINs.ListIndex, 0)
+
+    Dim port As Portfolio
+    Set port = portfolios(portName)
+
+    ' Assuming benchmark retrieval logic
+    Dim bench As Portfolio
+    ' Set bench = port.Benchmark
+
+    If bench Is Nothing Then Exit Sub
+
+    ' Call the backend function
+    Dim proposedTrades As Dictionary
+    Set proposedTrades = TradeProposer.ProposeSingleLineTrade(port, bench, selectedISIN)
+
+    ' Display Results
+    If proposedTrades.count = 0 Then
+        txtResult.Text = "No trades needed. Target matches current weight."
+        Exit Sub
+    End If
+
+    Dim resultText As String
+    resultText = "PROPOSED TRADES:" & vbCrLf & String(30, "-") & vbCrLf
+
+    Dim tKey As Variant
+    Dim tPos As Position
+
+    For Each tKey In proposedTrades
+        Set tPos = proposedTrades(tKey)
+        resultText = resultText & "ISIN: " & tPos.isin & vbCrLf
+        resultText = resultText & "Name: " & tPos.name & vbCrLf
+        resultText = resultText & "Action: " & IIf(tPos.qty > 0, "BUY", "SELL") & vbCrLf
+        resultText = resultText & "Quantity: " & Format(tPos.qty, "#,##0.00") & vbCrLf
+        resultText = resultText & "Amount (Base): " & Format(tPos.amountBaseCur, "#,##0") & " " & port.ccy & vbCrLf
+        resultText = resultText & String(20, "-") & vbCrLf
+    Next tKey
+
+    txtResult.Text = resultText
+
+    ' Optional: Auto-apply to portfolio trades dictionary so it flows to RouteTrades
+    ' Set port.trades = proposedTrades
+
+End Sub

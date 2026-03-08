@@ -5,13 +5,16 @@ Public rootDirReferential As String
 Public rootDirPortfolios As String
 Public FundsThroughXml As New Dictionary
 Public validInstrumentsAssetClassesForBDLReferential As New Dictionary
-
+Public globalMoneyMarketISIN As String
 
 Private Sub Class_Initialize()
 
     rootDirInfinInventories = "V:\Production\fund\inventory"
     rootDirReferential = "V:\Production\referentiel\INFIN"
     rootDirPortfolios = "V:\Production\portfolios"
+
+    ' Default ISIN for the Money Market fund used for financing
+    globalMoneyMarketISIN = "FR0010001844" ' Example ISIN, update as needed
 
     FundsThroughXml.Add "03653646.1001", True
     FundsThroughXml.Add "04432503.1001", True
