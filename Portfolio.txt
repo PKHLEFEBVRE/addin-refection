@@ -24,12 +24,14 @@ Public AUM As Double
 Public exposureLimits As Dictionary
 Public positions As Dictionary
 Public trades As Dictionary
+Public benchmark As Dictionary
 
 Private Sub Class_Initialize()
 
     Set exposureLimits = New Dictionary
     Set positions = New Dictionary
     Set trades = New Dictionary
+    Set benchmark = New Dictionary
 
 End Sub
 

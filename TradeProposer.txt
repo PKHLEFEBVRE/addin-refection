@@ -31,7 +31,7 @@ Public Function ProposeSingleLineTrade(port As Portfolio, bench As Portfolio, se
     End If
 
     If bPos Is Nothing Then
-        MsgBox "The selected ISIN was not found in the Benchmark.", vbExclamation
+        ' The selected ISIN was not found in the Benchmark. Return empty dict.
         Set ProposeSingleLineTrade = proposedTrades
         Exit Function
     End If
@@ -81,7 +81,7 @@ Public Function ProposeSingleLineTrade(port As Portfolio, bench As Portfolio, se
     End If
 
     If priceFactor = 0 Then
-        MsgBox "Cannot calculate quantity: price or fx is zero for " & selectedISIN, vbCritical
+        MsgBox "Cannot calculate quantity: price or fx is zero for " & selectedISIN & " in portfolio " & port.Name, vbCritical
         Set ProposeSingleLineTrade = proposedTrades
         Exit Function
     End If
@@ -146,11 +146,11 @@ Public Function ProposeSingleLineTrade(port As Portfolio, bench As Portfolio, se
             Next pKey
 
             If mmPos Is Nothing Then
-                MsgBox "Insufficient cash and no Money Market fund (" & mmISIN & ") found to fund this trade.", vbCritical, "Funding Error"
+                MsgBox "Insufficient cash and no Money Market fund (" & mmISIN & ") found to fund this trade for portfolio " & port.Name, vbCritical, "Funding Error"
                 ' Still return the asset trade, but user is warned
             Else
                 If mmPos.amountBaseCur < shortfall Then
-                    MsgBox "Warning: Selling ALL Money Market fund, but still short by " & Format(shortfall - mmPos.amountBaseCur, "#,##0") & " " & port.ccy, vbExclamation, "Funding Warning"
+                    MsgBox "Warning: Selling ALL Money Market fund for portfolio " & port.Name & ", but still short by " & Format(shortfall - mmPos.amountBaseCur, "#,##0") & " " & port.ccy, vbExclamation, "Funding Warning"
                     shortfall = mmPos.amountBaseCur ' Sell maximum available
                 End If
 
@@ -179,3 +179,107 @@ Public Function ProposeSingleLineTrade(port As Portfolio, bench As Portfolio, se
     Set ProposeSingleLineTrade = proposedTrades
 
 End Function
+
+' Evaluates all portfolios against their respective benchmarks for a selected ISIN
+Public Function ProposeGlobalLineTrade(portfolios As Dictionary, selectedISIN As String) As Dictionary
+
+    Dim globalTrades As New Dictionary ' Key: PortName -> Dictionary of Trades
+    Dim pKey As Variant
+    Dim port As Portfolio
+    Dim bench As Portfolio
+    Dim trades As Dictionary
+
+    For Each pKey In portfolios
+        Set port = portfolios(pKey)
+
+        If Not port.benchmark Is Nothing Then
+            If port.benchmark.Exists("composition") Then
+                Set bench = port.benchmark("composition")
+
+                ' Run the proposal logic for this specific portfolio and its benchmark
+                Set trades = ProposeSingleLineTrade(port, bench, selectedISIN)
+
+                If trades.count > 0 Then
+                    globalTrades.Add port.Name, trades
+                End If
+            End If
+        End If
+    Next pKey
+
+    Set ProposeGlobalLineTrade = globalTrades
+
+End Function
+
+' Generates an HTML email summarizing the global trades
+Public Sub EmailGlobalLineTrades(globalTrades As Dictionary, selectedISIN As String)
+
+    If globalTrades.count = 0 Then
+        MsgBox "No trades required for the selected ISIN across the portfolios.", vbInformation
+        Exit Sub
+    End If
+
+    Dim htmlBody As String
+    htmlBody = "<html><body style='font-family: Arial, sans-serif;'>"
+    htmlBody = htmlBody & "<h2>Proposed Trades for ISIN: " & selectedISIN & "</h2>"
+
+    Dim portName As Variant
+    Dim trades As Dictionary
+    Dim tKey As Variant
+    Dim tPos As Position
+
+    htmlBody = htmlBody & "<table border='1' style='border-collapse: collapse; width: 90%;'>"
+    htmlBody = htmlBody & "<tr style='background-color: #f2f2f2;'><th style='padding: 8px; text-align: left;'>Portfolio</th><th style='padding: 8px; text-align: left;'>Instrument Name</th><th style='padding: 8px; text-align: center;'>Action</th><th style='padding: 8px; text-align: right;'>Quantity</th><th style='padding: 8px; text-align: right;'>Amount (Base CCY)</th><th style='padding: 8px; text-align: left;'>Note</th></tr>"
+
+    For Each portName In globalTrades
+        Set trades = globalTrades(portName)
+
+        For Each tKey In trades
+            Set tPos = trades(tKey)
+
+            Dim actionStr As String
+            If tPos.qty > 0 Then actionStr = "BUY" Else actionStr = "SELL"
+
+            Dim colorStr As String
+            If actionStr = "BUY" Then colorStr = "green" Else colorStr = "red"
+
+            Dim noteStr As String
+            If tPos.isin <> selectedISIN Then
+                noteStr = "Funding Trade"
+            Else
+                noteStr = "Target Trade"
+            End If
+
+            htmlBody = htmlBody & "<tr>"
+            htmlBody = htmlBody & "<td style='padding: 8px; font-weight: bold;'>" & portName & "</td>"
+            htmlBody = htmlBody & "<td style='padding: 8px;'>" & tPos.name & "</td>"
+            htmlBody = htmlBody & "<td style='padding: 8px; text-align: center; color: " & colorStr & "; font-weight: bold;'>" & actionStr & "</td>"
+            htmlBody = htmlBody & "<td style='padding: 8px; text-align: right;'>" & Format(Abs(tPos.qty), "#,##0.00") & "</td>"
+            htmlBody = htmlBody & "<td style='padding: 8px; text-align: right;'>" & Format(Abs(tPos.amountBaseCur), "#,##0") & " " & tPos.ccy & "</td>"
+            htmlBody = htmlBody & "<td style='padding: 8px; font-style: italic; color: gray;'>" & noteStr & "</td>"
+            htmlBody = htmlBody & "</tr>"
+
+        Next tKey
+    Next portName
+
+    htmlBody = htmlBody & "</table>"
+    htmlBody = htmlBody & "<br><p>Regards,<br>Trade Proposer System</p></body></html>"
+
+    ' Generate Email via Outlook
+    On Error Resume Next
+    Dim outApp As Object
+    Dim outMail As Object
+    Set outApp = CreateObject("Outlook.Application")
+    If outApp Is Nothing Then
+        MsgBox "Cannot open Outlook to generate trade proposal email.", vbExclamation
+        Exit Sub
+    End If
+
+    Set outMail = outApp.CreateItem(0) ' olMailItem
+    With outMail
+        .Subject = "Trade Proposals for ISIN: " & selectedISIN & " - " & Format(Date, "YYYY-MM-DD")
+        .htmlBody = htmlBody
+        .Display ' Show the draft
+    End With
+    On Error GoTo 0
+
+End Sub
