@@ -30,11 +30,7 @@ Public Function ProposeSingleLineTrade(port As Portfolio, bench As Portfolio, se
         Next bKey
     End If
 
-    If bPos Is Nothing Then
-        ' The selected ISIN was not found in the Benchmark. Return empty dict.
-        Set ProposeSingleLineTrade = proposedTrades
-        Exit Function
-    End If
+    ' (Removed early exit if bPos is Nothing to allow selling non-benchmark assets to 0%)
 
     ' 2. Find Current Weight in Portfolio
     If Not port.positions Is Nothing Then
@@ -64,10 +60,16 @@ Public Function ProposeSingleLineTrade(port As Portfolio, bench As Portfolio, se
     If Not pPos Is Nothing Then
         ' Base trade on existing position to inherit CCY, FX, etc.
         Set assetTrade = pPos.Clone()
-    Else
+    ElseIf Not bPos Is Nothing Then
         ' Base trade on benchmark position if we don't own it yet
         Set assetTrade = bPos.Clone()
         assetTrade.account = port.Name ' Align with our portfolio
+    Else
+        ' This should never be reached if called correctly from ProposeLargestDiscrepancyTrade,
+        ' as the ISIN must exist in one or the other.
+        MsgBox "Cannot propose trade: ISIN " & selectedISIN & " found in neither portfolio nor benchmark.", vbCritical
+        Set ProposeSingleLineTrade = proposedTrades
+        Exit Function
     End If
 
     ' Calculate exact Quantity needed
@@ -210,17 +212,136 @@ Public Function ProposeGlobalLineTrade(portfolios As Dictionary, selectedISIN As
 
 End Function
 
+' Finds the ISIN with the largest absolute weight discrepancy between port and bench (must be > 2%)
+' and proposes the trades needed to fix it.
+Public Function ProposeLargestDiscrepancyTrade(port As Portfolio, bench As Portfolio) As Dictionary
+
+    Dim proposedTrades As New Dictionary
+
+    If port.positions Is Nothing Or bench.positions Is Nothing Then
+        Set ProposeLargestDiscrepancyTrade = proposedTrades
+        Exit Function
+    End If
+
+    Dim uniqueISINs As New Dictionary
+    Dim bKey As Variant, pKey As Variant
+    Dim pos As Position
+    Dim isCash As Boolean
+
+    ' 1. Collect all unique non-cash ISINs
+    For Each bKey In bench.positions
+        Set pos = bench.positions(bKey)
+        isCash = False
+        If Not pos.posInstrument Is Nothing Then
+            If LCase(Trim(pos.posInstrument.category)) = "cash" Then isCash = True
+        ElseIf pos.posID = "10" Or pos.posID = pos.ccy Then
+            isCash = True
+        End If
+        If pos.isin <> "" And Not isCash Then uniqueISINs(pos.isin) = 1
+    Next bKey
+
+    For Each pKey In port.positions
+        Set pos = port.positions(pKey)
+        isCash = False
+        If Not pos.posInstrument Is Nothing Then
+            If LCase(Trim(pos.posInstrument.category)) = "cash" Then isCash = True
+        ElseIf pos.posID = "10" Or pos.posID = pos.ccy Then
+            isCash = True
+        End If
+        If pos.isin <> "" And Not isCash Then uniqueISINs(pos.isin) = 1
+    Next pKey
+
+    ' 2. Evaluate Discrepancies
+    Dim isin As Variant
+    Dim maxDiff As Double: maxDiff = 0
+    Dim targetISIN As String: targetISIN = ""
+
+    Dim targetW As Double
+    Dim currentW As Double
+    Dim diff As Double
+
+    For Each isin In uniqueISINs.Keys
+        targetW = 0
+        currentW = 0
+
+        ' Get Target
+        For Each bKey In bench.positions
+            If bench.positions(bKey).isin = isin Then
+                targetW = bench.positions(bKey).weight
+                Exit For
+            End If
+        Next bKey
+
+        ' Get Current
+        For Each pKey In port.positions
+            If port.positions(pKey).isin = isin Then
+                currentW = port.positions(pKey).weight
+                Exit For
+            End If
+        Next pKey
+
+        diff = Abs(targetW - currentW)
+
+        If diff > maxDiff Then
+            maxDiff = diff
+            targetISIN = CStr(isin)
+        End If
+    Next isin
+
+    ' 3. Propose if > 2%
+    If maxDiff >= 0.02 And targetISIN <> "" Then
+        Set proposedTrades = ProposeSingleLineTrade(port, bench, targetISIN)
+    End If
+
+    Set ProposeLargestDiscrepancyTrade = proposedTrades
+
+End Function
+
+' Iterates through all portfolios, finds their individual largest discrepancy, and proposes trades.
+Public Function ProposeAllLargestDiscrepancies(portfolios As Dictionary) As Dictionary
+
+    Dim globalTrades As New Dictionary
+    Dim pKey As Variant
+    Dim port As Portfolio
+    Dim bench As Portfolio
+    Dim trades As Dictionary
+
+    For Each pKey In portfolios
+        Set port = portfolios(pKey)
+
+        If Not port.benchmark Is Nothing Then
+            If port.benchmark.Exists("composition") Then
+                Set bench = port.benchmark("composition")
+
+                Set trades = ProposeLargestDiscrepancyTrade(port, bench)
+
+                If trades.count > 0 Then
+                    globalTrades.Add port.Name, trades
+                End If
+            End If
+        End If
+    Next pKey
+
+    Set ProposeAllLargestDiscrepancies = globalTrades
+
+End Function
+
 ' Generates an HTML email summarizing the global trades
-Public Sub EmailGlobalLineTrades(globalTrades As Dictionary, selectedISIN As String)
+Public Sub EmailGlobalLineTrades(globalTrades As Dictionary, Optional contextString As String = "")
 
     If globalTrades.count = 0 Then
-        MsgBox "No trades required for the selected ISIN across the portfolios.", vbInformation
+        MsgBox "No trades required across the portfolios based on current parameters.", vbInformation
         Exit Sub
     End If
 
     Dim htmlBody As String
     htmlBody = "<html><body style='font-family: Arial, sans-serif;'>"
-    htmlBody = htmlBody & "<h2>Proposed Trades for ISIN: " & selectedISIN & "</h2>"
+
+    If contextString <> "" Then
+        htmlBody = htmlBody & "<h2>Proposed Trades for: " & contextString & "</h2>"
+    Else
+        htmlBody = htmlBody & "<h2>Proposed Trades: Largest Discrepancies (>2%)</h2>"
+    End If
 
     Dim portName As Variant
     Dim trades As Dictionary
@@ -243,7 +364,9 @@ Public Sub EmailGlobalLineTrades(globalTrades As Dictionary, selectedISIN As Str
             If actionStr = "BUY" Then colorStr = "green" Else colorStr = "red"
 
             Dim noteStr As String
-            If tPos.isin <> selectedISIN Then
+            ' In the "largest discrepancy" mode, there's no single target ISIN,
+            ' so we assume trades that end in "_FUNDING" are cash management trades.
+            If Right(CStr(tKey), 8) = "_FUNDING" Then
                 noteStr = "Funding Trade"
             Else
                 noteStr = "Target Trade"
@@ -276,7 +399,11 @@ Public Sub EmailGlobalLineTrades(globalTrades As Dictionary, selectedISIN As Str
 
     Set outMail = outApp.CreateItem(0) ' olMailItem
     With outMail
-        .Subject = "Trade Proposals for ISIN: " & selectedISIN & " - " & Format(Date, "YYYY-MM-DD")
+        If contextString <> "" Then
+            .Subject = "Trade Proposals: " & contextString & " - " & Format(Date, "YYYY-MM-DD")
+        Else
+            .Subject = "Trade Proposals: Largest Discrepancies - " & Format(Date, "YYYY-MM-DD")
+        End If
         .htmlBody = htmlBody
         .Display ' Show the draft
     End With
