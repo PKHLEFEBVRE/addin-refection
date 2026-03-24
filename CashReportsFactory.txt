@@ -1,0 +1,145 @@
+Option Explicit
+
+' Generates an aggregated Cash Report for all portfolios
+Public Function GenerateCashReport(portfolios As Dictionary) As Variant
+
+    Dim alertsDict As New Dictionary
+    alertsDict.Add "BREACH", New Dictionary
+    alertsDict.Add "WARNING", New Dictionary
+
+    If portfolios Is Nothing Then
+        GenerateCashReport = Array(Array(), alertsDict)
+        Exit Function
+    End If
+
+    If portfolios.Count = 0 Then
+        GenerateCashReport = Array(Array(), alertsDict)
+        Exit Function
+    End If
+
+    Dim nRows As Long
+    nRows = portfolios.Count + 1
+
+    Dim report() As Variant
+    ReDim report(1 To nRows, 1 To 6)
+
+    ' Headers
+    report(1, 1) = "Fund Name"
+    report(1, 2) = "Lowest Cash Weight"
+    report(1, 3) = "Lowest Cash Status"
+    report(1, 4) = "Total Cash Weight"
+    report(1, 5) = "Total Cash Limit"
+    report(1, 6) = "Total Cash Status"
+
+    Dim r As Long
+    r = 2
+
+    Dim pKey As Variant
+    Dim port As portfolio
+    Dim posKey As Variant
+    Dim pos As position
+
+    Dim lowestCashWeight As Double
+    Dim lowestCashCcy As String
+    Dim totalCashSum As Double
+    Dim isCash As Boolean
+
+    Dim baseCashLimit As Double
+    Dim totalCashLimit As Double
+
+    baseCashLimit = 0.0025 ' 0.25%
+
+    Dim isBreach As Boolean
+    isBreach = False
+
+    For Each pKey In portfolios
+        Set port = portfolios(pKey)
+
+        lowestCashWeight = 999999999
+        lowestCashCcy = ""
+        totalCashSum = 0
+
+        ' 1. Calculate Cash Exposures
+        If Not port.getPositions Is Nothing Then
+            For Each posKey In port.getPositions
+                Set pos = port.getPositions(posKey)
+                isCash = False
+
+                ' Identify Cash Position
+                If Not pos.posInstrument Is Nothing Then
+                    If LCase(Trim(pos.posInstrument.Category)) = "cash" And LCase(Trim(pos.Account)) = port.Name Then
+                        isCash = True
+                    End If
+                End If
+                ' Fallback identification just in case instrument is missing but it is a clear cash line
+                If Not isCash And (pos.posId = "10" Or pos.posId = pos.ccy) Then
+                    isCash = True
+                End If
+
+                If isCash Then
+                    totalCashSum = totalCashSum + pos.weight
+
+                    If pos.weight < lowestCashWeight Then
+                        lowestCashWeight = pos.weight
+                        lowestCashCcy = UCase(Trim(pos.ccy))
+                    End If
+                End If
+            Next posKey
+        End If
+
+        If lowestCashWeight = 999999999 Then lowestCashWeight = 0
+
+        ' 2. Determine Total Cash Limit
+        If port.AUM < 150000 Then
+            totalCashLimit = 0.1 ' 5%
+        Else
+            ' Check if fund is more than a year old
+            If (Date - port.creationDate) > 365.25 Then
+                totalCashLimit = 0.05 ' 2%
+            Else
+                totalCashLimit = 0.075 ' 3%
+            End If
+        End If
+
+        ' 3. Populate Report Row
+        report(r, 1) = port.Name
+
+        report(r, 2) = lowestCashWeight
+        If lowestCashWeight < baseCashLimit And port.AUM > 0 Then
+            Dim tempWarn As String
+            If lowestCashWeight < 0 Then
+                tempWarn = "BREACH"
+            ElseIf lowestCashCcy = UCase(Trim(port.ccy)) Then
+                tempWarn = "WARNING"
+            Else
+                tempWarn = "-"
+            End If
+
+            report(r, 3) = tempWarn
+            If tempWarn <> "-" Then
+                If Not alertsDict(tempWarn).Exists(port.Name) Then alertsDict(tempWarn).Add port.Name, New Dictionary
+                alertsDict(tempWarn)(port.Name).Add "Lowest Cash Min", Array(lowestCashWeight, baseCashLimit)
+                If Not isBreach Then isBreach = True
+            End If
+
+        Else
+            report(r, 3) = "-"
+        End If
+
+        report(r, 4) = totalCashSum
+        report(r, 5) = totalCashLimit
+        If totalCashSum > totalCashLimit Then
+            report(r, 6) = "WARNING"
+            If Not alertsDict("WARNING").Exists(port.Name) Then alertsDict("WARNING").Add port.Name, New Dictionary
+            alertsDict("WARNING")(port.Name).Add "Total Cash Max", Array(totalCashSum, totalCashLimit)
+            If Not isBreach Then isBreach = True
+        Else
+            report(r, 6) = "-"
+        End If
+
+        r = r + 1
+    Next pKey
+
+    GenerateCashReport = Array(report, alertsDict)
+
+End Function
