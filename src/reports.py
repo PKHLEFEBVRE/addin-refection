@@ -44,10 +44,12 @@ def get_aggregated_exposure(portfolios: Dict[str, Portfolio], key1: str, key2: s
     return exposure_dicts, unique_keys
 
 def generate_diff_portfolios(portfolios: Dict[str, Portfolio], benchmarks: Dict[str, Portfolio]) -> Dict[str, Portfolio]:
-    return {
-        create_diff_portfolio(port, benchmarks[key]).name: create_diff_portfolio(port, benchmarks[key])
-        for key, port in portfolios.items() if key in benchmarks
-    }
+    diff_portfolios = {}
+    for key, port in portfolios.items():
+        if key in benchmarks:
+            diff_port = create_diff_portfolio(port, benchmarks[key])
+            diff_portfolios[diff_port.name] = diff_port
+    return diff_portfolios
 
 def get_exposure_report(portfolios: Dict[str, Portfolio], key1: str, key2: str = "") -> List[List[Any]]:
     exp_dicts, keys = get_aggregated_exposure(portfolios, key1, key2)
