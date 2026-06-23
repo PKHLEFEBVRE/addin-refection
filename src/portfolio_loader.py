@@ -35,6 +35,8 @@ def load_positions_for_type(portfolios: Dict[str, Portfolio], type_filter: str, 
 
 def create_diff_portfolio(port: Portfolio, bench: Portfolio) -> Portfolio:
     diff_port = Portfolio(
+        creation_date=port.creation_date,
+        inception_date=port.inception_date,
         name=f"{port.name} vs {bench.name}",
         fund_type="Difference",
         mandate_type=port.mandate_type,

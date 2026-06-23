@@ -5,13 +5,16 @@ from position import Position
 
 @dataclass
 class Portfolio:
+    # Required parameters (without default values) must come first in dataclasses
+    creation_date: datetime
+    inception_date: datetime
+
+    # Parameters with defaults
     fund_type: str = ""
     fund_id: str = ""
     symbol: str = ""
     name: str = ""
     currency: str = ""
-    creation_date: Optional[datetime] = None
-    inception_date: Optional[datetime] = None
     closing_date: Optional[datetime] = None
     active: bool = False
     custodian: str = ""
@@ -105,12 +108,29 @@ class Portfolio:
         def get_bool(k: str) -> bool:
             return str(get_str(k)).lower() == 'true'
 
+        def parse_date(k: str) -> Optional[datetime]:
+            val = get_str(k)
+            if val:
+                try:
+                    return dateutil.parser.parse(val)
+                except Exception:
+                    pass
+            return None
+
+        # Mandatory dates, fallback to a sensible default (like epoch) if truly missing from dictionary
+        # to fulfill strict signature requirements. Usually, data pipelines enforce presence beforehand.
+        parsed_creation = parse_date("Creation Date") or datetime(1970, 1, 1)
+        parsed_inception = parse_date("Inception Date") or datetime(1970, 1, 1)
+
         port = cls(
+            creation_date=parsed_creation,
+            inception_date=parsed_inception,
             fund_type=get_str("Type"),
             fund_id=get_str("Id"),
             symbol=get_str("Symbol"),
             name=get_str("Name"),
             currency=get_str("Currency"),
+            closing_date=parse_date("Closing Date"),
             active=get_bool("Active"),
             custodian=get_str("Custodian"),
             mandate_type=get_str("Mandate Type"),
@@ -124,17 +144,5 @@ class Portfolio:
             sri=get_str("SRI"),
             via=get_str("Via")
         )
-
-        for date_field, attr_name in [
-            ("Creation Date", "creation_date"),
-            ("Inception Date", "inception_date"),
-            ("Closing Date", "closing_date")
-        ]:
-            val = get_str(date_field)
-            if val:
-                try:
-                    setattr(port, attr_name, dateutil.parser.parse(val))
-                except Exception:
-                    pass
 
         return port

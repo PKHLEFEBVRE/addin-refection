@@ -17,9 +17,8 @@ def get_inventory(dt: datetime, fund_id: str, fund_name: str) -> Dict[str, Any]:
     ident = fund_id or fund_name
 
     try:
-        # We need a dummy portfolio object just to pass the name.
         from portfolio import Portfolio
-        dummy_port = Portfolio(name=fund_name)
+        dummy_port = Portfolio(name=fund_name, creation_date=datetime(1970,1,1), inception_date=datetime(1970,1,1))
 
         if ident in _config.funds_through_xml:
             positions = position_loader.get_positions_by_date_from_xml_file(dt, dummy_port)
