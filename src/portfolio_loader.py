@@ -17,7 +17,7 @@ def get_portfolios_from_file(path: str, dt: datetime) -> Dict[str, Portfolio]:
     portfolios: Dict[str, Portfolio] = {}
 
     for row in records:
-        key = str(row.get("InfinId", "")).strip() or str(row.get("Name", "")).strip()
+        key = str(row.get("Id", "")).strip() or str(row.get("Name", "")).strip()
 
         if key:
             if key not in portfolios:
@@ -37,8 +37,8 @@ def create_diff_portfolio(port: Portfolio, bench: Portfolio) -> Portfolio:
     diff_port = Portfolio(
         name=f"{port.name} vs {bench.name}",
         fund_type="Difference",
-        mandat_type=port.mandat_type,
-        ccy=port.ccy
+        mandate_type=port.mandate_type,
+        currency=port.currency
     )
 
     diff_port.positions = {k: v.clone() for k, v in port.positions.items()}
@@ -61,40 +61,52 @@ def enrich_portfolios_from_dashboard(portfolios: Dict[str, Portfolio], path: str
     found_portfolios = set()
 
     for row in records:
-        key = str(row.get("InfinId", "")).strip() or str(row.get("Account name", "")).strip()
+        key = str(row.get("Id", "")).strip() or str(row.get("Name", "")).strip()
         port = portfolios.get(key)
 
         if not port:
             key_lower = key.lower()
-            port = next((p for p in portfolios.values() if key_lower in (p.infin_id.lower(), p.account_name.lower(), p.name.lower())), None)
+            port = next((p for p in portfolios.values() if key_lower in (p.fund_id.lower(), p.name.lower())), None)
 
         if port:
-            found_portfolios.add(port.infin_id)
+            found_portfolios.add(port.fund_id)
             found_portfolios.add(port.name)
 
             def get_str(col: str) -> str:
                 val = row.get(col)
                 return str(val) if pd.notna(val) else ""
 
-            if client := get_str("Client"): port.client = client
-            if insurer := get_str("Insurer"): port.insurer = insurer
+            def get_bool(k: str) -> bool:
+                return str(get_str(k)).lower() == 'true'
+
+            if fund_type := get_str("Type"): port.fund_type = fund_type
+            if symbol := get_str("Symbol"): port.symbol = symbol
+            if currency := get_str("Currency"): port.currency = currency
+            port.active = get_bool("Active")
             if custodian := get_str("Custodian"): port.custodian = custodian
-            if sales := get_str("Sales"): port.sales = sales
-            if acc_type := get_str("Account type"): port.mandat_type = acc_type
-            if av_type := get_str("AV Type"): port.av_type = av_type
-            if ccy := get_str("CCY"): port.ccy = ccy
+            if mandate_type := get_str("Mandate Type"): port.mandate_type = mandate_type
+            if account_type := get_str("Account Type"): port.account_type = account_type
+            if life_insurer := get_str("Life Insurer"): port.life_insurer = life_insurer
+            if life_insurer_product := get_str("Life Insurer Product"): port.life_insurer_product = life_insurer_product
             if profile := get_str("Profile"): port.profile = profile
-            if comp := get_str("Composition"): port.composition = comp
-            if t_prof := get_str("Target Profile"): port.target_profile = t_prof
-            if t_comp := get_str("Target Composition"): port.target_composition = t_comp
+            if model := get_str("Model"): port.model = model
+            if manager := get_str("Manager"): port.manager = manager
+            if srri := get_str("SRRI"): port.srri = srri
+            if sri := get_str("SRI"): port.sri = sri
+            if via := get_str("Via"): port.via = via
 
-            if creation_date := get_str("Creation date"):
-                try:
-                    port.creation_date = dateutil.parser.parse(creation_date)
-                except Exception:
-                    pass
+            for date_field, attr_name in [
+                ("Creation Date", "creation_date"),
+                ("Inception Date", "inception_date"),
+                ("Closing Date", "closing_date")
+            ]:
+                if val := get_str(date_field):
+                    try:
+                        setattr(port, attr_name, dateutil.parser.parse(val))
+                    except Exception:
+                        pass
 
-    missing = [f"- {p.name} ({p.infin_id})" for p in portfolios.values() if p.infin_id not in found_portfolios and p.name not in found_portfolios]
+    missing = [f"- {p.name} ({p.fund_id})" for p in portfolios.values() if p.fund_id not in found_portfolios and p.name not in found_portfolios]
 
     if missing:
         msg = "CRITICAL ERROR: The following portfolios are missing from the Dashboard sheet.\n"

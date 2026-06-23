@@ -5,28 +5,30 @@ from position import Position
 
 @dataclass
 class Portfolio:
-    name: str = ""
-    comment: str = ""
-    infin_id: str = ""
-    insurance_contract: str = ""
-    account_name: str = ""
-    client: str = ""
-    creation_date: Optional[datetime] = None
-    insurer: str = ""
-    custodian: str = ""
-    sales: str = ""
-    mandat_type: str = ""
     fund_type: str = ""
-    av_type: str = ""
-    ccy: str = ""
+    fund_id: str = ""
+    symbol: str = ""
+    name: str = ""
+    currency: str = ""
+    creation_date: Optional[datetime] = None
+    inception_date: Optional[datetime] = None
+    closing_date: Optional[datetime] = None
+    active: bool = False
+    custodian: str = ""
+    mandate_type: str = ""
+    account_type: str = ""
+    life_insurer: str = ""
+    life_insurer_product: str = ""
     profile: str = ""
-    composition: str = ""
-    target_profile: str = ""
-    target_composition: str = ""
-    last_computed: str = ""
+    model: str = ""
+    manager: str = ""
+    srri: str = ""
+    sri: str = ""
+    via: str = ""
+
+    # Internal computational properties
     cash_and_treso: float = 0.0
     aum: float = 0.0
-
     exposure_limits: Dict[str, Any] = field(default_factory=dict)
     positions: Dict[str, Position] = field(default_factory=dict)
     trades: Dict[str, Position] = field(default_factory=dict)
@@ -40,7 +42,6 @@ class Portfolio:
 
     def get_positions_with_trades(self) -> Dict[str, Position]:
         sim_positions = {k: pos.clone() for k, pos in self.positions.items()}
-
         total_trade_cost = sum(t.amount_base_cur for k, t in self.trades.items() if k != "10")
 
         for key, trade in self.trades.items():
@@ -79,10 +80,10 @@ class Portfolio:
         if self.positions:
             return self.positions
 
-        inventory_id = self.infin_id or self.name
+        inventory_id = self.fund_id or self.name
 
         if inventory_id:
-            self.positions = data.get_inventory(dt, self.infin_id, self.name)
+            self.positions = data.get_inventory(dt, self.fund_id, self.name)
             self.aum = sum(pos.amount_base_cur for pos in self.positions.values())
 
             if self.aum != 0:
@@ -101,43 +102,39 @@ class Portfolio:
             val = data.get(k)
             return str(val).replace('"', '').strip() if pd.notna(val) and val != "" else ""
 
-        def get_float(k: str) -> float:
-            val = get_str(k)
-            if val:
-                try:
-                    return float(val.replace(',', '.'))
-                except ValueError:
-                    pass
-            return 0.0
+        def get_bool(k: str) -> bool:
+            return str(get_str(k)).lower() == 'true'
 
         port = cls(
-            name=get_str("Name"),
-            comment=get_str("comment"),
-            infin_id=get_str("InfinId"),
-            insurance_contract=get_str("insuranceContract"),
-            account_name=get_str("accountName"),
-            client=get_str("client"),
-            insurer=get_str("insurer"),
-            custodian=get_str("custodian"),
-            sales=get_str("sales"),
             fund_type=get_str("Type"),
-            mandat_type=get_str("AccountType"),
-            av_type=get_str("AVType"),
-            ccy=get_str("ccy"),
-            profile=get_str("profile"),
-            composition=get_str("composition"),
-            target_profile=get_str("targetProfile"),
-            target_composition=get_str("targetComposition"),
-            last_computed=get_str("lastComputed"),
-            cash_and_treso=get_float("CashAndTreso"),
-            aum=get_float("AUM")
+            fund_id=get_str("Id"),
+            symbol=get_str("Symbol"),
+            name=get_str("Name"),
+            currency=get_str("Currency"),
+            active=get_bool("Active"),
+            custodian=get_str("Custodian"),
+            mandate_type=get_str("Mandate Type"),
+            account_type=get_str("Account Type"),
+            life_insurer=get_str("Life Insurer"),
+            life_insurer_product=get_str("Life Insurer Product"),
+            profile=get_str("Profile"),
+            model=get_str("Model"),
+            manager=get_str("Manager"),
+            srri=get_str("SRRI"),
+            sri=get_str("SRI"),
+            via=get_str("Via")
         )
 
-        creation_date_str = get_str("creationDate")
-        if creation_date_str:
-            try:
-                port.creation_date = dateutil.parser.parse(creation_date_str)
-            except Exception:
-                pass
+        for date_field, attr_name in [
+            ("Creation Date", "creation_date"),
+            ("Inception Date", "inception_date"),
+            ("Closing Date", "closing_date")
+        ]:
+            val = get_str(date_field)
+            if val:
+                try:
+                    setattr(port, attr_name, dateutil.parser.parse(val))
+                except Exception:
+                    pass
 
         return port
