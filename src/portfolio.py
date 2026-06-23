@@ -5,33 +5,32 @@ from position import Position
 
 @dataclass
 class Portfolio:
-    # Required parameters (without default values) must come first in dataclasses
+    # All fields except closing_date are mandatory (no default values)
+    fund_type: str
+    fund_id: str
+    symbol: str
+    name: str
+    currency: str
     creation_date: datetime
     inception_date: datetime
+    active: bool
+    custodian: str
+    mandate_type: str
+    account_type: str
+    life_insurer: str
+    life_insurer_product: str
+    profile: str
+    model: str
+    manager: str
+    srri: str
+    sri: str
+    via: str
 
-    # Parameters with defaults
-    fund_type: str = ""
-    fund_id: str = ""
-    symbol: str = ""
-    name: str = ""
-    currency: str = ""
     closing_date: Optional[datetime] = None
-    active: bool = False
-    custodian: str = ""
-    mandate_type: str = ""
-    account_type: str = ""
-    life_insurer: str = ""
-    life_insurer_product: str = ""
-    profile: str = ""
-    model: str = ""
-    manager: str = ""
-    srri: str = ""
-    sri: str = ""
-    via: str = ""
 
     # Internal computational properties
-    cash_and_treso: float = 0.0
-    aum: float = 0.0
+    cash_and_treso: float = field(default=0.0)
+    aum: float = field(default=0.0)
     exposure_limits: Dict[str, Any] = field(default_factory=dict)
     positions: Dict[str, Position] = field(default_factory=dict)
     trades: Dict[str, Position] = field(default_factory=dict)
@@ -117,20 +116,18 @@ class Portfolio:
                     pass
             return None
 
-        # Mandatory dates, fallback to a sensible default (like epoch) if truly missing from dictionary
-        # to fulfill strict signature requirements. Usually, data pipelines enforce presence beforehand.
+        # Mandatory dates fallback (to prevent crashing, pipeline should enforce presence)
         parsed_creation = parse_date("Creation Date") or datetime(1970, 1, 1)
         parsed_inception = parse_date("Inception Date") or datetime(1970, 1, 1)
 
         port = cls(
-            creation_date=parsed_creation,
-            inception_date=parsed_inception,
             fund_type=get_str("Type"),
             fund_id=get_str("Id"),
             symbol=get_str("Symbol"),
             name=get_str("Name"),
             currency=get_str("Currency"),
-            closing_date=parse_date("Closing Date"),
+            creation_date=parsed_creation,
+            inception_date=parsed_inception,
             active=get_bool("Active"),
             custodian=get_str("Custodian"),
             mandate_type=get_str("Mandate Type"),
@@ -142,7 +139,8 @@ class Portfolio:
             manager=get_str("Manager"),
             srri=get_str("SRRI"),
             sri=get_str("SRI"),
-            via=get_str("Via")
+            via=get_str("Via"),
+            closing_date=parse_date("Closing Date")
         )
 
         return port

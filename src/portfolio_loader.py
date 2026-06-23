@@ -35,12 +35,25 @@ def load_positions_for_type(portfolios: Dict[str, Portfolio], type_filter: str, 
 
 def create_diff_portfolio(port: Portfolio, bench: Portfolio) -> Portfolio:
     diff_port = Portfolio(
+        fund_type="Difference",
+        fund_id="",
+        symbol="",
+        name=f"{port.name} vs {bench.name}",
+        currency=port.currency,
         creation_date=port.creation_date,
         inception_date=port.inception_date,
-        name=f"{port.name} vs {bench.name}",
-        fund_type="Difference",
+        active=False,
+        custodian="",
         mandate_type=port.mandate_type,
-        currency=port.currency
+        account_type="",
+        life_insurer="",
+        life_insurer_product="",
+        profile="",
+        model="",
+        manager="",
+        srri="",
+        sri="",
+        via=""
     )
 
     diff_port.positions = {k: v.clone() for k, v in port.positions.items()}

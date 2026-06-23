@@ -18,7 +18,13 @@ def get_inventory(dt: datetime, fund_id: str, fund_name: str) -> Dict[str, Any]:
 
     try:
         from portfolio import Portfolio
-        dummy_port = Portfolio(name=fund_name, creation_date=datetime(1970,1,1), inception_date=datetime(1970,1,1))
+        dummy_port = Portfolio(
+            fund_type="", fund_id=ident, symbol="", name=fund_name, currency="",
+            creation_date=datetime(1970,1,1), inception_date=datetime(1970,1,1),
+            active=False, custodian="", mandate_type="", account_type="",
+            life_insurer="", life_insurer_product="", profile="", model="", manager="",
+            srri="", sri="", via=""
+        )
 
         if ident in _config.funds_through_xml:
             positions = position_loader.get_positions_by_date_from_xml_file(dt, dummy_port)

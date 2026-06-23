@@ -17,7 +17,8 @@ class Position:
     ccy: str = ""
     fx: float = 0.0
 
-    quote_in_pct: float = 0.0
+    quote_in_pct_factor: float = 1.0
+    quote_in_pct: float = 0.0 # Deprecated in favor of quote_in_pct_factor but kept for backwards compatibility
     amount_base_cur: float = 0.0
     weight: float = 0.0
 

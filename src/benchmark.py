@@ -9,8 +9,17 @@ logger = logging.getLogger(__name__)
 
 MONEY_MARKET_ID = "MM_FUND_PLACEHOLDER"
 
+def _create_dummy_portfolio(name: str) -> Portfolio:
+    return Portfolio(
+        fund_type="", fund_id="", symbol="", name=name, currency="",
+        creation_date=datetime(1970,1,1), inception_date=datetime(1970,1,1),
+        active=False, custodian="", mandate_type="", account_type="",
+        life_insurer="", life_insurer_product="", profile="", model="", manager="",
+        srri="", sri="", via=""
+    )
+
 def compute_benchmark(target_portfolio: Portfolio, apply_time_adjustment: bool = False) -> Portfolio:
-    benchmark = Portfolio(name=f"Benchmark for {target_portfolio.name}")
+    benchmark = _create_dummy_portfolio(name=f"Benchmark for {target_portfolio.name}")
 
     buckets = _load_buckets()
     defensive_model = _load_model_composition("ModelDefensive")
@@ -96,13 +105,11 @@ def _get_equity_delta(port: Portfolio) -> float:
     return delta / 100.0 if delta > 1.0 else delta
 
 def _load_buckets() -> Dict[str, Portfolio]:
-    # We load from a configuration file instead of active Excel Named Range
     import data
     config = data.get_configuration()
     buckets: Dict[str, Portfolio] = {}
 
     try:
-        # Expected CSV structure: BucketName, InstrumentID, InstrumentName, Weight
         df = pd.read_csv("buckets_data.csv")
 
         instr_dict = {}
@@ -124,7 +131,7 @@ def _load_buckets() -> Dict[str, Portfolio]:
                 continue
 
             if b_name not in buckets:
-                buckets[b_name] = Portfolio(name=b_name)
+                buckets[b_name] = _create_dummy_portfolio(name=b_name)
 
             pos = Position(pos_id=instr_id, weight=weight)
             if instr_dict and instr_id in instr_dict:
@@ -138,10 +145,8 @@ def _load_buckets() -> Dict[str, Portfolio]:
     return buckets
 
 def _load_model_composition(range_name: str) -> Dict[str, float]:
-    # We load from a configuration file instead of active Excel Named Range
     composition: Dict[str, float] = {}
     try:
-        # Expected CSV structure: BucketName, Weight
         file_map = {
             "ModelDefensive": "model_defensive.csv",
             "ModelAggressive": "model_aggressive.csv"
